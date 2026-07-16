@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+alembic
+watchdog
+python-multipart
+pydantic-settings

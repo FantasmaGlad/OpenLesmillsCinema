@@ -1,0 +1,25 @@
+# Configuration OpenLesmillsCinema
+#
+# En développement, ce fichier est lu depuis la racine de backend/.
+# En production (Lot 14), il est remplacé par /etc/openlesmillscinema/config.toml.
+# Les chemins relatifs ci-dessous sont résolus par rapport à la racine du projet backend/.
+
+[server]
+host = "0.0.0.0"
+port = 8000
+
+[database]
+database_url = "sqlite:///data/database.db"
+
+[paths]
+media_dir = "data/videos"
+watch_dir = "data/watched"
+thumbnails_dir = "data/thumbnails"
+
+[playback]
+# Durée (secondes) de l'écran d'attente intercalé entre deux cours d'une playlist (F2.6)
+wait_time_between_courses = 10
+# Durée (secondes) du compte à rebours 5-4-3-2-1 avant chaque lancement (F1.4, UX2.8)
+countdown_seconds = 5
+# Volume par défaut au démarrage (0-100)
+volume_default = 100

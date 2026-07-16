@@ -1,0 +1,18 @@
+# OpenLesmillsCinema Configuration
+
+[database]
+database_url = "sqlite:///data/database.db"
+
+[media]
+media_dir = "data/videos"
+watch_dir = "data/watched"
+thumbnails_dir = "data/thumbnails"
+
+[server]
+host = "0.0.0.0"
+port = 8000
+
+[playback]
+wait_time_between_courses = 10
+countdown_seconds = 5
+volume_default = 100

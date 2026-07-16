@@ -1,0 +1,22 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Données locales (vidéos, base, logs) - ne doivent jamais être versionnées
+*.db
+*.sqlite3
+/videos/
+/logs/
+/data/
+
+# Fichiers de test personnels (vidéos sources volumineuses)
+/VideoTest/
+
+# Divers
+.DS_Store
