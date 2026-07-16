@@ -9,13 +9,36 @@ export type PlaybackStateValue =
   | "paused"
   | "coach_mode"
   | "offline"
-  | "playlist_waiting";
+  | "playlist_waiting"
+  | "background";
 
 export interface PlaybackVideo {
   id: number;
   title: string;
   duration_seconds: number | null;
   program?: string | null;
+  thumbnail_url?: string | null;
+}
+
+export interface PlaybackBackground {
+  id: number;
+  title: string;
+}
+
+export type AudioChainMode = "auto" | "timer" | "manual";
+
+export interface PlaybackAudioCourse {
+  id: number;
+  title: string;
+  program: string | null;
+  background_id: number | null;
+}
+
+export interface PlaybackAudioTrack {
+  id: number;
+  number: number | null;
+  title: string;
+  duration_seconds: number | null;
 }
 
 export interface PlaybackState {
@@ -30,6 +53,15 @@ export interface PlaybackState {
   playlist_items: PlaybackVideo[] | null;
   playlist_index: number | null;
   playlist_waiting_remaining: number | null;
+  current_background: PlaybackBackground | null;
+  current_audio_course: PlaybackAudioCourse | null;
+  audio_tracks: PlaybackAudioTrack[] | null;
+  audio_track_index: number | null;
+  audio_playing: boolean;
+  audio_position_seconds: number;
+  audio_chain_mode: AudioChainMode;
+  audio_chain_timer_seconds: number;
+  audio_chain_wait_remaining: number | null;
 }
 
 export interface PlaybackEvent {
@@ -51,6 +83,15 @@ const DEFAULT_STATE: PlaybackState = {
   playlist_items: null,
   playlist_index: null,
   playlist_waiting_remaining: null,
+  current_background: null,
+  current_audio_course: null,
+  audio_tracks: null,
+  audio_track_index: null,
+  audio_playing: false,
+  audio_position_seconds: 0,
+  audio_chain_mode: "auto",
+  audio_chain_timer_seconds: 20,
+  audio_chain_wait_remaining: null,
 };
 
 function getWsUrl(): string {

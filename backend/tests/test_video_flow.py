@@ -59,10 +59,17 @@ class TestVideoFlow(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        # Dispose engine to release file locks
+        from app.database import engine
+        engine.dispose()
         # Clean up database file
         db_path = Path(settings.database_url.replace("sqlite:///", ""))
         if db_path.exists():
-            db_path.unlink()
+            try:
+                db_path.unlink()
+            except PermissionError:
+                pass
+
 
         # Clean up directories
         for d in [settings.media_dir, settings.watch_dir, settings.thumbnails_dir]:

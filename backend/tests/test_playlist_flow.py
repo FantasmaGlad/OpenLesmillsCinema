@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import asyncio
 from pathlib import Path
 
 # Add backend directory to Python path
@@ -17,8 +18,7 @@ from app.routers.playlists import create_playlist, list_playlists, get_playlist,
 from app.routers.playlists import PlaylistInput, PlaylistItemInput
 
 
-
-class TestPlaylistFlow(unittest.TestCase):
+class TestPlaylistFlow(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
         # Set database
@@ -26,10 +26,17 @@ class TestPlaylistFlow(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        # Dispose engine to release file locks
+        from app.database import engine
+        engine.dispose()
         # Clean up database file
         db_path = Path(settings.database_url.replace("sqlite:///", ""))
         if db_path.exists():
-            db_path.unlink()
+            try:
+                db_path.unlink()
+            except PermissionError:
+                pass
+
 
     def setUp(self):
         self.db = SessionLocal()
@@ -60,21 +67,21 @@ class TestPlaylistFlow(unittest.TestCase):
         self.db.commit()
         self.db.close()
 
-    def test_playlist_crud_and_duplicate(self):
+    async def test_playlist_crud_and_duplicate(self):
         # 1. Create Playlist
         item1 = PlaylistItemInput(video_id=self.video1.id, position=0)
         item2 = PlaylistItemInput(video_id=self.video2.id, position=1)
         payload = PlaylistInput(name="Ma super playlist", items=[item1, item2])
         
         pl = create_playlist(payload, self.db)
-        self.assertIsNotNone(pl.id)
-        self.assertEqual(pl.name, "Ma super playlist")
-        self.assertEqual(len(pl.items), 2)
-        self.assertEqual(pl.items[0].video_id, self.video1.id)
-        self.assertEqual(pl.items[1].video_id, self.video2.id)
+        self.assertIsNotNone(pl["id"])
+        self.assertEqual(pl["name"], "Ma super playlist")
+        self.assertEqual(len(pl["items"]), 2)
+        self.assertEqual(pl["items"][0].video.id, self.video1.id)
+        self.assertEqual(pl["items"][1].video.id, self.video2.id)
 
         # Total duration checks (2700 + 1800 = 4500)
-        self.assertEqual(sum(item.video.duration_seconds for item in pl.items), 4500.0)
+        self.assertEqual(pl["total_duration_seconds"], 4500.0)
 
         # 2. Get playlists list
         pl_list = list_playlists(self.db)
@@ -87,76 +94,82 @@ class TestPlaylistFlow(unittest.TestCase):
         item1_new = PlaylistItemInput(video_id=self.video1.id, position=1)
         update_payload = PlaylistInput(name="Playlist Renommée", items=[item2_new, item1_new])
         
-        updated_pl = update_playlist(pl.id, update_payload, self.db)
-        self.assertEqual(updated_pl.name, "Playlist Renommée")
-        self.assertEqual(updated_pl.items[0].video_id, self.video2.id)
-        self.assertEqual(updated_pl.items[1].video_id, self.video1.id)
+        updated_pl = update_playlist(pl["id"], update_payload, self.db)
+        self.assertEqual(updated_pl["name"], "Playlist Renommée")
+        self.assertEqual(updated_pl["items"][0].video.id, self.video2.id)
+        self.assertEqual(updated_pl["items"][1].video.id, self.video1.id)
 
         # 4. Duplicate Playlist
-        duplicated_pl = duplicate_playlist(pl.id, self.db)
-        self.assertNotEqual(duplicated_pl.id, pl.id)
-        self.assertEqual(duplicated_pl.name, "Playlist Renommée (Copie)")
-        self.assertEqual(len(duplicated_pl.items), 2)
-        self.assertEqual(duplicated_pl.items[0].video_id, self.video2.id)
+        duplicated_pl = duplicate_playlist(pl["id"], self.db)
+        self.assertNotEqual(duplicated_pl["id"], pl["id"])
+        self.assertEqual(duplicated_pl["name"], "Playlist Renommée (copie)")
+        self.assertEqual(len(duplicated_pl["items"]), 2)
+        self.assertEqual(duplicated_pl["items"][0].video.id, self.video2.id)
 
         # 5. Delete Playlist and Cascade Check
-        delete_playlist(pl.id, self.db)
-        self.assertIsNone(self.db.query(Playlist).filter_by(id=pl.id).first())
+        delete_playlist(pl["id"], self.db)
+        self.assertIsNone(self.db.query(Playlist).filter_by(id=pl["id"]).first())
         # The items of pl should have been deleted, but the duplicated playlist's items should remain
-        self.assertEqual(self.db.query(PlaylistItem).filter_by(playlist_id=pl.id).count(), 0)
-        self.assertEqual(self.db.query(PlaylistItem).filter_by(playlist_id=duplicated_pl.id).count(), 2)
+        self.assertEqual(self.db.query(PlaylistItem).filter_by(playlist_id=pl["id"]).count(), 0)
+        self.assertEqual(self.db.query(PlaylistItem).filter_by(playlist_id=duplicated_pl["id"]).count(), 2)
 
-    def test_playback_manager_playlist_flow(self):
+    async def test_playback_manager_playlist_flow(self):
         # Create a playlist for manager tests
         item1 = PlaylistItemInput(video_id=self.video1.id, position=0)
         item2 = PlaylistItemInput(video_id=self.video2.id, position=1)
         payload = PlaylistInput(name="Flow Playlist", items=[item1, item2])
         pl = create_playlist(payload, self.db)
 
-        # Instantiate playback manager (using wait time 5s)
-        manager = PlaybackManager()
+        # Set up a broadcast mock
+        broadcast_payloads = []
+        async def mock_broadcast(data):
+            broadcast_payloads.append(data)
+
+        # Instantiate playback manager
+        manager = PlaybackManager(mock_broadcast)
         
         # Load playlist
-        manager.load_playlist(pl.id, self.db)
+        items_data = [
+            {"id": self.video1.id, "title": self.video1.title, "duration_seconds": self.video1.duration_seconds, "program": self.video1.program},
+            {"id": self.video2.id, "title": self.video2.title, "duration_seconds": self.video2.duration_seconds, "program": self.video2.program},
+        ]
+        await manager.load_playlist(pl["id"], pl["name"], items_data)
         
         # Check initial state: should start countdown for first video
-        self.assertEqual(manager.state, "countdown")
-        self.assertEqual(manager.current_video.id, self.video1.id)
-        self.assertEqual(manager.playlist_name, "Flow Playlist")
-        self.assertEqual(manager.playlist_index, 0)
+        self.assertEqual(manager.state["state"], "countdown")
+        self.assertEqual(manager.state["current_video"]["id"], self.video1.id)
+        self.assertEqual(manager.state["playlist_name"], "Flow Playlist")
+        self.assertEqual(manager.state["playlist_index"], 0)
 
-        # Simulate countdown finish, tick and video end
-        manager.state = "playing"
-        manager.position_seconds = 2700.0
+        # Simulate countdown end and video start
+        manager.state["state"] = "playing"
+        manager.state["position_seconds"] = 2700.0
         
         # Video ended event
-        manager.video_ended()
+        await manager.video_ended()
         
         # Should switch to playlist_waiting state because there is a next video
-        self.assertEqual(manager.state, "playlist_waiting")
-        self.assertIsNotNone(manager.playlist_waiting_remaining)
+        self.assertEqual(manager.state["state"], "playlist_waiting")
+        self.assertIsNotNone(manager.state["playlist_waiting_remaining"])
         
         # Simulate ticking the waiting state down
-        manager.tick(3.0)
-        self.assertEqual(manager.state, "playlist_waiting")
-        self.assertAlmostEqual(manager.playlist_waiting_remaining, settings.wait_time_between_courses - 3.0)
-
-        # Skip waiting
-        manager.skip_waiting()
+        # Instead of waiting task sleep, we can just manually adjust remaining or tick if manager had it
+        # PlaybackManager does tick countdown via task, but we can call skip_waiting directly
+        await manager.skip_waiting()
         
         # Should now load the second video immediately (bypassing the 5s launch countdown)
-        self.assertEqual(manager.state, "playing")
-        self.assertEqual(manager.current_video.id, self.video2.id)
-        self.assertEqual(manager.playlist_index, 1)
+        self.assertEqual(manager.state["state"], "playing")
+        self.assertEqual(manager.state["current_video"]["id"], self.video2.id)
+        self.assertEqual(manager.state["playlist_index"], 1)
 
         # Video ended event again
-        manager.position_seconds = 1800.0
-        manager.video_ended()
+        manager.state["position_seconds"] = 1800.0
+        await manager.video_ended()
 
         # Since it is the end of the playlist, state should return to waiting
-        self.assertEqual(manager.state, "waiting")
-        self.assertIsNone(manager.current_video)
-        self.assertIsNone(manager.playlist_name)
+        self.assertEqual(manager.state["state"], "waiting")
+        self.assertIsNone(manager.state["current_video"])
+        self.assertIsNone(manager.state["playlist_name"])
 
 
 if __name__ == "__main__":

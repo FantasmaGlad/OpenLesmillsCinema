@@ -11,21 +11,36 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import init_db, get_db
-from app.models import Video
-from app.routers import videos, playback, timer, schedule, playlists
+from app.models import AudioTrack, Background, Video
+from app.routers import videos, playback, timer, schedule, playlists, backgrounds, audio, settings as settings_router, logs
+from app.scheduler_manager import start_scheduler, stop_scheduler
 from app.utils.watcher import start_watcher, stop_watcher
 
-logging.basicConfig(level=logging.INFO)
+# Log technique (réf. F8.2, Lot 9.6/UX3.18) : mêmes messages que la console
+# de dev, en plus écrits dans un fichier consultable/téléchargeable depuis
+# l'interface. La rotation (F8.3) est un sujet dédié du Lot 13, pas traité ici.
+settings.technical_log_path.parent.mkdir(parents=True, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(settings.technical_log_path, encoding="utf-8"),
+    ],
+)
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup : Initialisation de la BDD et démarrage du watcher
+    # Startup : Initialisation de la BDD, démarrage du watcher et du scheduler
     init_db()
     start_watcher()
+    start_scheduler()
     yield
-    # Shutdown : Arrêt propre du watcher
+    # Shutdown : Arrêt propre du scheduler et du watcher
+    stop_scheduler()
     stop_watcher()
 
 
@@ -47,6 +62,10 @@ app.include_router(playback.router)
 app.include_router(playlists.router)
 app.include_router(timer.router)
 app.include_router(schedule.router)
+app.include_router(backgrounds.router)
+app.include_router(audio.router)
+app.include_router(settings_router.router)
+app.include_router(logs.router)
 
 
 @app.get("/api/health")
@@ -54,22 +73,15 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/api/videos/{video_id}/stream")
-def stream_video(
-    video_id: int,
-    range: str | None = Header(None),
-    db: Session = Depends(get_db),
-):
+def _range_stream_response(file_path: Path, range: str | None, content_type: str) -> StreamingResponse:
     """
-    Sert le flux vidéo avec le support HTTP Range (nécessaire pour la lecture directe et le saut dans la timeline).
+    Sert un fichier avec support HTTP Range (nécessaire pour la lecture directe
+    et le saut dans la timeline). Partagé par tous les flux média (vidéos,
+    fonds animés, pistes audio) : même logique de découpage par octets quel
+    que soit le type de contenu.
     """
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="Vidéo non trouvée")
-
-    file_path = Path(video.file_path)
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Fichier vidéo manquant sur le disque")
+        raise HTTPException(status_code=404, detail="Fichier manquant sur le disque")
 
     file_size = file_path.stat().st_size
     start, end = 0, file_size - 1
@@ -106,11 +118,48 @@ def stream_video(
         "Content-Range": f"bytes {start}-{end}/{file_size}",
         "Accept-Ranges": "bytes",
         "Content-Length": str(chunk_size),
-        "Content-Type": "video/mp4",
+        "Content-Type": content_type,
     }
     return StreamingResponse(
         file_generator(), status_code=206 if range else 200, headers=headers
     )
+
+
+@app.get("/api/videos/{video_id}/stream")
+def stream_video(
+    video_id: int,
+    range: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Vidéo non trouvée")
+    return _range_stream_response(Path(video.file_path), range, "video/mp4")
+
+
+@app.get("/api/backgrounds/{background_id}/stream")
+def stream_background(
+    background_id: int,
+    range: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
+    background = db.query(Background).filter(Background.id == background_id).first()
+    if not background:
+        raise HTTPException(status_code=404, detail="Fond animé non trouvé")
+    content_type = "video/webm" if background.file_path.lower().endswith(".webm") else "video/mp4"
+    return _range_stream_response(Path(background.file_path), range, content_type)
+
+
+@app.get("/api/audio/tracks/{track_id}/stream")
+def stream_audio_track(
+    track_id: int,
+    range: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
+    track = db.query(AudioTrack).filter(AudioTrack.id == track_id).first()
+    if not track:
+        raise HTTPException(status_code=404, detail="Piste audio non trouvée")
+    return _range_stream_response(Path(track.file_path), range, "audio/mpeg")
 
 
 # Montage des dossiers statiques requis

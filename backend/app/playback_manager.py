@@ -18,6 +18,7 @@ class PlaybackStateEnum(str, enum.Enum):
     coach_mode = "coach_mode"
     offline = "offline"
     playlist_waiting = "playlist_waiting"
+    background = "background"  # Lot 7 (F9.2) : fond animé en boucle, plein écran, sans son
 
 
 class PlaybackManager:
@@ -32,6 +33,7 @@ class PlaybackManager:
         self._broadcast = broadcast
         self._countdown_task: asyncio.Task | None = None
         self._waiting_task: asyncio.Task | None = None
+        self._audio_chain_wait_task: asyncio.Task | None = None
         self.state: dict[str, Any] = {
             "state": PlaybackStateEnum.waiting.value,
             "current_video": None,
@@ -44,6 +46,16 @@ class PlaybackManager:
             "playlist_items": None,
             "playlist_index": None,
             "playlist_waiting_remaining": None,
+            "current_background": None,
+            # Mode audio coach (Lot 8, réf. F10.3-F10.4)
+            "current_audio_course": None,
+            "audio_tracks": None,
+            "audio_track_index": None,
+            "audio_playing": False,
+            "audio_position_seconds": 0.0,
+            "audio_chain_mode": "auto",
+            "audio_chain_timer_seconds": settings.audio_chain_timer_seconds,
+            "audio_chain_wait_remaining": None,
         }
 
     def snapshot(self) -> dict:
@@ -69,6 +81,24 @@ class PlaybackManager:
             self._waiting_task.cancel()
         self._waiting_task = None
 
+    def _cancel_audio_chain_wait(self):
+        if self._audio_chain_wait_task and not self._audio_chain_wait_task.done():
+            self._audio_chain_wait_task.cancel()
+        self._audio_chain_wait_task = None
+
+    def _clear_audio_coach(self):
+        """Sort du mode audio coach (réf. F10.4) — appelé par tout ce qui
+        prend le relais sur l'écran (cours vidéo, playlist, fond animé,
+        arrêt manuel). Ne s'applique PAS à la règle de priorité F10.7, qui
+        empêche au contraire une programmation automatique d'appeler ceci."""
+        self._cancel_audio_chain_wait()
+        self.state["current_audio_course"] = None
+        self.state["audio_tracks"] = None
+        self.state["audio_track_index"] = None
+        self.state["audio_playing"] = False
+        self.state["audio_position_seconds"] = 0.0
+        self.state["audio_chain_wait_remaining"] = None
+
     async def load(
         self,
         video_id: int,
@@ -78,9 +108,12 @@ class PlaybackManager:
         client_ts: float | None = None,
         keep_playlist: bool = False,
         skip_countdown: bool = False,
+        thumbnail_url: str | None = None,
     ):
         """Lance un cours : bascule en compte à rebours puis en lecture."""
         self._cancel_countdown()
+        self.state["current_background"] = None
+        self._clear_audio_coach()
         if not keep_playlist:
             self._cancel_waiting()
             self.state["playlist_id"] = None
@@ -94,6 +127,7 @@ class PlaybackManager:
             "title": title,
             "duration_seconds": duration_seconds,
             "program": program,
+            "thumbnail_url": thumbnail_url,
         }
         self.state["position_seconds"] = 0.0
         self.state["volume"] = self.state.get("volume", settings.volume_default)
@@ -161,6 +195,7 @@ class PlaybackManager:
             client_ts=client_ts,
             keep_playlist=True,
             skip_countdown=False,
+            thumbnail_url=first_item.get("thumbnail_url"),
         )
 
     async def _run_waiting_period(self):
@@ -199,6 +234,7 @@ class PlaybackManager:
                 client_ts=client_ts,
                 keep_playlist=True,
                 skip_countdown=True, # Pas de décompte initial de 5s pour les vidéos suivantes
+                thumbnail_url=next_item.get("thumbnail_url"),
             )
         else:
             await self.stop(client_ts)
@@ -231,6 +267,7 @@ class PlaybackManager:
             client_ts=client_ts,
             keep_playlist=True,
             skip_countdown=True,
+            thumbnail_url=prev_item.get("thumbnail_url"),
         )
 
     async def skip_waiting(self, client_ts: float | None = None):
@@ -261,6 +298,13 @@ class PlaybackManager:
             await self.stop(client_ts)
 
     async def play(self, client_ts: float | None = None):
+        # En mode coach (Lot 8), "Lecture" pilote la piste audio en cours
+        # plutôt que la vidéo — même bouton, comportement contextuel (UX5.1 :
+        # un seul état partagé, pas de mode de contrôle séparé par écran).
+        if self.state["current_audio_course"] is not None:
+            self.state["audio_playing"] = True
+            await self._emit("play", client_ts)
+            return
         if (
             self.state["current_video"] is None
             or self.state["state"] == PlaybackStateEnum.countdown.value
@@ -271,6 +315,10 @@ class PlaybackManager:
         await self._emit("play", client_ts)
 
     async def pause(self, client_ts: float | None = None):
+        if self.state["current_audio_course"] is not None:
+            self.state["audio_playing"] = False
+            await self._emit("pause", client_ts)
+            return
         if (
             self.state["current_video"] is None
             or self.state["state"] == PlaybackStateEnum.countdown.value
@@ -283,6 +331,7 @@ class PlaybackManager:
     async def stop(self, client_ts: float | None = None):
         self._cancel_countdown()
         self._cancel_waiting()
+        self._clear_audio_coach()
         self.state["state"] = PlaybackStateEnum.waiting.value
         self.state["current_video"] = None
         self.state["position_seconds"] = 0.0
@@ -292,7 +341,28 @@ class PlaybackManager:
         self.state["playlist_items"] = None
         self.state["playlist_index"] = None
         self.state["playlist_waiting_remaining"] = None
+        self.state["current_background"] = None
         await self._emit("stop", client_ts)
+
+    async def load_background(self, background_id: int, title: str, client_ts: float | None = None):
+        """Lance un fond animé en boucle infinie, plein écran, sans son (réf.
+        F9.2). Prend le relais immédiatement sur toute lecture en cours — pas
+        de compte à rebours, une boucle d'ambiance n'est pas un « lancement de
+        cours » (UX2.8 ne s'applique qu'aux vidéos de cours)."""
+        self._cancel_countdown()
+        self._cancel_waiting()
+        self._clear_audio_coach()
+        self.state["state"] = PlaybackStateEnum.background.value
+        self.state["current_video"] = None
+        self.state["position_seconds"] = 0.0
+        self.state["countdown_remaining"] = None
+        self.state["playlist_id"] = None
+        self.state["playlist_name"] = None
+        self.state["playlist_items"] = None
+        self.state["playlist_index"] = None
+        self.state["playlist_waiting_remaining"] = None
+        self.state["current_background"] = {"id": background_id, "title": title}
+        await self._emit("load_background", client_ts)
 
     async def seek(self, position_seconds: float, client_ts: float | None = None):
         if self.state["current_video"] is None or self.state["state"] == PlaybackStateEnum.playlist_waiting.value:
@@ -318,6 +388,167 @@ class PlaybackManager:
             return
         self.state["position_seconds"] = position_seconds
         await self._emit("position_report")
+
+    # ------------------------------------------------------------------
+    # Mode audio coach (Lot 8, réf. F10.3/F10.4/UX4.5-4.9)
+    # ------------------------------------------------------------------
+    async def load_audio_course(
+        self,
+        course_id: int,
+        title: str,
+        program: str | None,
+        background_id: int | None,
+        tracks: list[dict],
+        chain_mode: str | None = None,
+        chain_timer_seconds: float | None = None,
+        client_ts: float | None = None,
+    ):
+        """Lance un cours audio : bascule immédiate en mode coach, lecture de
+        la première piste (réf. F10.4 « lancer en 2 taps maximum » — le choix
+        du cours suffit, pas de tap Lecture supplémentaire nécessaire)."""
+        self._cancel_countdown()
+        self._cancel_waiting()
+        self._cancel_audio_chain_wait()
+        self.state["current_video"] = None
+        self.state["position_seconds"] = 0.0
+        self.state["countdown_remaining"] = None
+        self.state["playlist_id"] = None
+        self.state["playlist_name"] = None
+        self.state["playlist_items"] = None
+        self.state["playlist_index"] = None
+        self.state["playlist_waiting_remaining"] = None
+        self.state["current_background"] = None
+
+        self.state["state"] = PlaybackStateEnum.coach_mode.value
+        self.state["current_audio_course"] = {
+            "id": course_id,
+            "title": title,
+            "program": program,
+            "background_id": background_id,
+        }
+        self.state["audio_tracks"] = tracks
+        self.state["audio_track_index"] = 0 if tracks else None
+        self.state["audio_playing"] = bool(tracks)
+        self.state["audio_position_seconds"] = 0.0
+        if chain_mode in ("auto", "timer", "manual"):
+            self.state["audio_chain_mode"] = chain_mode
+        if chain_timer_seconds is not None:
+            self.state["audio_chain_timer_seconds"] = max(1, int(chain_timer_seconds))
+        await self._emit("load_audio_course", client_ts)
+
+    def _goto_track(self, index: int, client_ts: float | None = None) -> bool:
+        tracks = self.state["audio_tracks"]
+        if not tracks or index < 0 or index >= len(tracks):
+            return False
+        self._cancel_audio_chain_wait()
+        self.state["audio_track_index"] = index
+        self.state["audio_position_seconds"] = 0.0
+        self.state["audio_playing"] = True
+        return True
+
+    async def audio_next_track(self, client_ts: float | None = None):
+        idx = self.state["audio_track_index"]
+        if idx is None:
+            return
+        if self._goto_track(idx + 1, client_ts):
+            await self._emit("audio_next_track", client_ts)
+        else:
+            # Dernière piste déjà atteinte : fin du cours, on reste affiché
+            # mais en pause (réf. F10.3, pas d'arrêt automatique du mode coach).
+            self._cancel_audio_chain_wait()
+            self.state["audio_playing"] = False
+            await self._emit("audio_course_ended", client_ts)
+
+    async def audio_previous_track(self, client_ts: float | None = None):
+        idx = self.state["audio_track_index"]
+        if idx is None:
+            return
+        if self._goto_track(idx - 1, client_ts):
+            await self._emit("audio_previous_track", client_ts)
+
+    async def audio_restart_track(self, client_ts: float | None = None):
+        """Relance la piste en cours depuis le début (réf. UX4.6)."""
+        if self.state["audio_track_index"] is None:
+            return
+        self._cancel_audio_chain_wait()
+        self.state["audio_position_seconds"] = 0.0
+        self.state["audio_playing"] = True
+        await self._emit("audio_restart_track", client_ts)
+
+    async def audio_jump_to_track(self, index: int, client_ts: float | None = None):
+        """Saut direct à une piste depuis la liste (bottom sheet, réf. UX4.7)."""
+        if self._goto_track(index, client_ts):
+            await self._emit("audio_jump_to_track", client_ts)
+
+    async def audio_set_chain_mode(self, mode: str, client_ts: float | None = None):
+        if mode not in ("auto", "timer", "manual"):
+            return
+        self._cancel_audio_chain_wait()
+        self.state["audio_chain_mode"] = mode
+        self.state["audio_chain_wait_remaining"] = None
+        await self._emit("audio_chain_mode", client_ts)
+
+    async def audio_set_chain_timer(self, seconds: float, client_ts: float | None = None):
+        self.state["audio_chain_timer_seconds"] = max(1, int(seconds))
+        await self._emit("audio_chain_timer", client_ts)
+
+    async def audio_report_position(self, position_seconds: float):
+        if self.state["current_audio_course"] is None:
+            return
+        self.state["audio_position_seconds"] = position_seconds
+        await self._emit("audio_position_report")
+
+    async def _run_audio_chain_wait(self):
+        try:
+            remaining = self.state["audio_chain_wait_remaining"] or 0.0
+            while remaining > 0:
+                await asyncio.sleep(1.0)
+                remaining -= 1.0
+                self.state["audio_chain_wait_remaining"] = max(0.0, remaining)
+                await self._emit("audio_chain_wait_tick")
+            self.state["audio_chain_wait_remaining"] = None
+            idx = self.state["audio_track_index"]
+            if idx is not None and self._goto_track(idx + 1):
+                await self._emit("audio_next_track")
+            else:
+                self.state["audio_playing"] = False
+                await self._emit("audio_course_ended")
+        except asyncio.CancelledError:
+            pass
+
+    async def audio_track_ended(self, client_ts: float | None = None):
+        """
+        Fin naturelle d'une piste signalée par le kiosk (`<audio onEnded>`).
+        Trois comportements selon le mode d'enchaînement actif (réf. F10.3,
+        UX4.8) :
+        - auto : piste suivante immédiatement ;
+        - timer : attente `audio_chain_timer_seconds` puis piste suivante ;
+        - manual : la piste reste arrêtée, le coach relance à la main.
+        """
+        if self.state["current_audio_course"] is None:
+            return
+
+        mode = self.state["audio_chain_mode"]
+        idx = self.state["audio_track_index"]
+
+        if mode == "manual":
+            self.state["audio_playing"] = False
+            await self._emit("audio_track_ended_manual", client_ts)
+            return
+
+        if mode == "timer":
+            self.state["audio_playing"] = False
+            self.state["audio_chain_wait_remaining"] = float(self.state["audio_chain_timer_seconds"])
+            await self._emit("audio_chain_wait_start", client_ts)
+            self._audio_chain_wait_task = asyncio.create_task(self._run_audio_chain_wait())
+            return
+
+        # mode == "auto"
+        if idx is not None and self._goto_track(idx + 1, client_ts):
+            await self._emit("audio_next_track", client_ts)
+        else:
+            self.state["audio_playing"] = False
+            await self._emit("audio_course_ended", client_ts)
 
 
 _manager: PlaybackManager | None = None

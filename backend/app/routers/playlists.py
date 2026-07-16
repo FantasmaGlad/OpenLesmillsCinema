@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Playlist, PlaylistItem, Video
+from app.utils.activity_log import log_activity
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,7 @@ def create_playlist(data: PlaylistInput, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(playlist)
+    log_activity(db, "playlist_created", f"{playlist.name} ({len(data.items)} cours)")
 
     # Re-requêter les détails pour renvoyer la réponse structurée
     return get_playlist(playlist.id, db)
@@ -175,6 +177,7 @@ def update_playlist(playlist_id: int, data: PlaylistInput, db: Session = Depends
 
     db.commit()
     db.refresh(playlist)
+    log_activity(db, "playlist_updated", playlist.name)
 
     return get_playlist(playlist.id, db)
 
@@ -188,8 +191,10 @@ def delete_playlist(playlist_id: int, db: Session = Depends(get_db)):
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist non trouvée")
 
+    name = playlist.name
     db.delete(playlist)
     db.commit()
+    log_activity(db, "playlist_deleted", name)
     return {"message": "Playlist supprimée avec succès"}
 
 

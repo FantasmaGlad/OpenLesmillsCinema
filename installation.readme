@@ -1,0 +1,149 @@
+OpenLesmillsCinema — Installation sur le mini PC (Wyse 5070 / Debian 13)
+=========================================================================
+
+Ce document décrit comment amener le code source sur la machine cible
+(le mini PC qui pilote l'écran cinéma), puis l'installer. Deux façons
+d'amener le code sont possibles : synchronisation directe par SSH (pas
+besoin d'accès Internet sur la machine cible, cohérent avec l'esprit
+"local-first" du projet — cf. NF1 du cahier des charges), ou clonage
+depuis GitHub. Choisissez celle qui vous convient, les deux aboutissent
+au même résultat : le dépôt présent sur la machine cible, prêt pour
+`install.sh`.
+
+Prérequis, dans tous les cas :
+  - Debian 13 "Trixie" déjà installé sur la machine cible (Lot 0).
+  - La machine cible est joignable sur le réseau local, avec un accès
+    SSH (mot de passe ou clé) pour un compte utilisateur normal
+    (PAS root — voir §3, install.sh refuse d'être lancé déjà en root).
+  - Adaptez `<UTILISATEUR>` et `<IP-DE-LA-MACHINE>` ci-dessous à votre
+    situation (ex. `<IP-DE-LA-MACHINE>` = 192.168.1.95).
+
+
+1. Option A — Synchroniser via SSH (sans passer par GitHub)
+-------------------------------------------------------------
+
+C'est la méthode la plus directe pour déployer ou mettre à jour depuis
+votre poste de développement, surtout utile si la machine cible n'a
+pas d'accès Internet sortant.
+
+1.1 Depuis votre poste de développement, à la racine du dépôt local :
+
+    rsync -avz --exclude='.git' --exclude='backend/.venv' \
+      --exclude='backend/data' --exclude='data' \
+      --exclude='frontend/node_modules' --exclude='frontend/.next' \
+      --exclude='frontend/out' \
+      ./ <UTILISATEUR>@<IP-DE-LA-MACHINE>:~/OpenLesmillsCinema/
+
+    (rsync sera demandé un mot de passe SSH à chaque lancement, sauf si
+    une clé est en place — voir §1.3 optionnel ci-dessous.)
+
+    Les dossiers exclus (`.venv`, `node_modules`, `data`, builds) sont
+    volontairement reconstruits sur place par `install.sh` : les
+    transférer ferait perdre du temps et pourrait écraser des données
+    déjà présentes sur la machine cible (vidéos importées, base SQLite).
+
+1.2 Pour resynchroniser après des modifications ultérieures, relancez
+    exactement la même commande `rsync` : seuls les fichiers modifiés
+    sont retransférés.
+
+1.3 (Optionnel mais recommandé) Éviter de retaper le mot de passe à
+    chaque synchronisation, en installant votre clé publique SSH sur
+    la machine cible :
+
+    ssh-copy-id <UTILISATEUR>@<IP-DE-LA-MACHINE>
+
+    (Si vous n'avez pas encore de paire de clés : `ssh-keygen -t ed25519`
+    puis relancez la commande ci-dessus.)
+
+
+2. Option B — Cloner depuis GitHub
+-------------------------------------------------------------
+
+Si le dépôt est hébergé sur GitHub, deux variantes :
+
+2.1 Cloner directement sur la machine cible (si elle a un accès
+    Internet sortant) :
+
+    ssh <UTILISATEUR>@<IP-DE-LA-MACHINE>
+    git clone <URL-DU-DEPOT-GITHUB> ~/OpenLesmillsCinema
+    cd ~/OpenLesmillsCinema
+
+    <URL-DU-DEPOT-GITHUB> est soit l'URL HTTPS
+    (https://github.com/<organisation>/<depot>.git), soit l'URL SSH
+    (git@github.com:<organisation>/<depot>.git) si une clé de déploiement
+    est configurée côté GitHub pour ce compte.
+
+2.2 Ou cloner en local puis transférer par SSH (utile si seule votre
+    machine de développement a un accès GitHub) :
+
+    git clone <URL-DU-DEPOT-GITHUB> OpenLesmillsCinema
+    cd OpenLesmillsCinema
+    rsync -avz --exclude='.git' ./ <UTILISATEUR>@<IP-DE-LA-MACHINE>:~/OpenLesmillsCinema/
+
+2.3 Pour mettre à jour une machine cible déjà clonée directement (§2.1),
+    depuis la machine cible :
+
+    cd ~/OpenLesmillsCinema
+    git pull
+
+
+3. Installer (une fois le code présent sur la machine cible)
+-------------------------------------------------------------
+
+Depuis une session SSH ouverte sur la machine cible, dans le dossier du
+dépôt :
+
+    cd ~/OpenLesmillsCinema
+    sudo ./install.sh
+
+Ce que fait le script (réf. Lot 14 du plan de construction) :
+  - installe les dépendances système (ffmpeg, Chromium, pilote VAAPI
+    Intel, Node.js si absent) ;
+  - crée l'environnement virtuel Python et installe les dépendances
+    backend ;
+  - construit le frontend (npm install && npm run build) ;
+  - ajoute votre utilisateur aux groupes `render`/`video` (nécessaire
+    pour le décodage vidéo matériel, cf. Lot 0) ;
+  - écrit la configuration de production dans
+    /etc/openlesmillscinema/config.toml ;
+  - installe et démarre les services systemd (backend + kiosk Chromium) ;
+  - installe le script de contrôle `openlesmillscinema`.
+
+Le script est idempotent : le relancer après une resynchronisation ou
+un `git pull` met à jour proprement l'installation existante.
+
+IMPORTANT après une PREMIÈRE installation : un redémarrage complet de
+la machine est nécessaire avant la mise en salle (l'appartenance aux
+groupes render/video ne s'applique qu'aux nouvelles sessions) :
+
+    sudo reboot
+
+Après redémarrage, vérifiez que le décodage matériel fonctionne
+toujours (cf. Lot 0) :
+
+    vainfo                        # doit lister les profils H.264/HEVC (pilote iHD)
+    openlesmillscinema status     # les deux services doivent être actifs
+
+
+4. Accès et contrôle au quotidien
+-------------------------------------------------------------
+
+  - Interface d'administration : http://<IP-DE-LA-MACHINE>:8000 (depuis
+    le réseau local) ou http://127.0.0.1:8000 (en local sur la machine).
+  - Écran cinéma (kiosk) : démarre automatiquement au boot.
+  - Contrôle des services :
+
+        openlesmillscinema start|stop|restart|status|logs
+
+  - Sortie du mode kiosk pour accéder à l'administration en local sur
+    le mini PC : changement de terminal virtuel au clavier
+    (Ctrl+Alt+F2), le kiosk tourne sur vt1 (réf. F1.6).
+
+
+5. En cas de problème
+
+  - Logs techniques en direct : `openlesmillscinema logs`
+  - Logs applicatifs consultables aussi depuis l'interface web
+    (section Logs).
+  - `bash -n install.sh` permet de vérifier la syntaxe du script sans
+    l'exécuter, si vous l'avez modifié.
