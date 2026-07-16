@@ -55,6 +55,13 @@ export default function LibraryPage() {
   // Delete modal confirmation
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
   const [videoToDelete, setVideoToDelete] = useState<Video | null>(null);
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState<boolean>(false);
+
+  // Sélection multiple (réf. UX3.9)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [playlists, setPlaylists] = useState<{ id: number; name: string }[]>([]);
+  const [showAddToPlaylist, setShowAddToPlaylist] = useState<boolean>(false);
+  const [bulkTargetPlaylistId, setBulkTargetPlaylistId] = useState<string>("");
 
   // Toast state
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -115,6 +122,65 @@ export default function LibraryPage() {
   useEffect(() => {
     fetchVideos();
   }, [search, programFilter, releaseFilter, sortBy]);
+
+  useEffect(() => {
+    fetch(getApiUrl("/playlists"), { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setPlaylists)
+      .catch(() => setPlaylists([]));
+  }, []);
+
+  const toggleSelected = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const confirmBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    const results = await Promise.allSettled(ids.map((id) => fetch(getApiUrl(`/videos/${id}`), { method: "DELETE" })));
+    const failed = results.filter((r) => r.status === "rejected").length;
+    showToast(failed > 0 ? `${ids.length - failed}/${ids.length} vidéos supprimées` : `${ids.length} vidéo(s) supprimée(s)`, failed > 0 ? "warning" : "success");
+    setBulkDeleteConfirm(false);
+    clearSelection();
+    fetchVideos();
+  };
+
+  const confirmBulkAddToPlaylist = async () => {
+    if (!bulkTargetPlaylistId) return;
+    try {
+      const res = await fetch(getApiUrl(`/playlists/${bulkTargetPlaylistId}`), { cache: "no-store" });
+      if (!res.ok) throw new Error();
+      const playlist = await res.json();
+      const existingIds: number[] = playlist.items.map((i: { video: { id: number } }) => i.video.id);
+      const newItems = [
+        ...playlist.items.map((i: { video: { id: number } }, idx: number) => ({ video_id: i.video.id, position: idx })),
+        ...Array.from(selectedIds)
+          .filter((id) => !existingIds.includes(id))
+          .map((id, idx) => ({ video_id: id, position: playlist.items.length + idx })),
+      ];
+      const putRes = await fetch(getApiUrl(`/playlists/${bulkTargetPlaylistId}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: playlist.name, items: newItems }),
+      });
+      if (putRes.ok) {
+        showToast(`${selectedIds.size} vidéo(s) ajoutée(s) à « ${playlist.name} »`);
+        setShowAddToPlaylist(false);
+        setBulkTargetPlaylistId("");
+        clearSelection();
+      } else {
+        showToast("Erreur lors de l'ajout à la playlist", "error");
+      }
+    } catch {
+      showToast("Erreur lors de l'ajout à la playlist", "error");
+    }
+  };
 
   // Handle video card/row click -> Open Drawer
   const handleSelectVideo = (video: Video) => {
@@ -526,6 +592,27 @@ export default function LibraryPage() {
         )}
       </div>
 
+      {/* Barre d'actions groupées (réf. UX3.9) */}
+      {selectedIds.size > 0 && (
+        <div className="interrupted-block">
+          <div className="interrupted-text">
+            <span className="interrupted-label">Sélection</span>
+            <span className="interrupted-title">{selectedIds.size} vidéo(s) sélectionnée(s)</span>
+          </div>
+          <div className="interrupted-actions">
+            <button className="btn btn-secondary" onClick={() => setShowAddToPlaylist(true)}>
+              Ajouter à une playlist
+            </button>
+            <button className="btn btn-danger" onClick={() => setBulkDeleteConfirm(true)}>
+              Supprimer
+            </button>
+            <button className="btn btn-secondary" onClick={clearSelection}>
+              Annuler la sélection
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Toolbar / Search / Filters */}
       <div className="library-toolbar">
         <div className="toolbar-filters">
@@ -606,44 +693,82 @@ export default function LibraryPage() {
           <p style={{ fontSize: "0.85rem", margin: "4px 0 0" }}>Essayez d'importer une nouvelle vidéo ou d'ajuster les filtres</p>
         </div>
       ) : viewMode === "grid" ? (
-        /* GRID VIEW */
-        <div className="videos-grid">
-          {videos.map((video) => {
-            const thumbSrc = getThumbnailSrc(video);
-            return (
-              <div
-                key={video.id}
-                className={`video-card ${getProgramClass(video.program)}`}
-                onClick={() => handleSelectVideo(video)}
-              >
-                <div className="thumbnail-wrapper">
-                  {thumbSrc ? (
-                    <img src={thumbSrc} alt={video.title} className="card-thumbnail" />
-                  ) : (
-                    <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", background: "#0c0c0e", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <svg className="w-8 h-8 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ opacity: 0.2 }}>
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                  )}
-                  <span className="card-duration">{formatDuration(video.duration_seconds)}</span>
-                </div>
-                <div className="card-content">
-                  <h4 className="card-title" title={video.title}>
-                    {video.title}
-                  </h4>
-                  <div className="card-meta-row">
-                    <span className={`program-badge ${getProgramBadgeClass(video.program)}`}>
-                      {video.program || "Autre"}
-                    </span>
-                    {video.release && (
-                      <span className="release-badge">Rel. {video.release}</span>
-                    )}
-                  </div>
+        /* GRID VIEW — groupée par programme (réf. UX3.6) */
+        <div style={{ display: "flex", flexDirection: "column", gap: "32px" }}>
+          {["RPM", "Sprint", "The Trip", "Autre"]
+            .map((program) => ({
+              program,
+              items: videos.filter((v) =>
+                program === "Autre" ? !v.program || !["RPM", "Sprint", "The Trip"].includes(v.program) : v.program === program
+              ),
+            }))
+            .filter((g) => g.items.length > 0)
+            .map((group) => (
+              <div key={group.program}>
+                <h3
+                  style={{
+                    fontSize: "0.85rem",
+                    marginBottom: "16px",
+                    color:
+                      group.program === "RPM"
+                        ? "var(--accent-rpm)"
+                        : group.program === "Sprint"
+                        ? "var(--accent-sprint)"
+                        : group.program === "The Trip"
+                        ? "var(--accent-trip)"
+                        : "var(--text-muted)",
+                  }}
+                >
+                  {group.program} <span style={{ color: "var(--text-dim)" }}>({group.items.length})</span>
+                </h3>
+                <div className="videos-grid">
+                  {group.items.map((video) => {
+                    const thumbSrc = getThumbnailSrc(video);
+                    const isSelected = selectedIds.has(video.id);
+                    return (
+                      <div
+                        key={video.id}
+                        className={`video-card ${getProgramClass(video.program)}`}
+                        onClick={() => handleSelectVideo(video)}
+                      >
+                        <div className="thumbnail-wrapper">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => toggleSelected(video.id)}
+                            style={{ position: "absolute", top: "8px", left: "8px", zIndex: 2, width: "20px", height: "20px", cursor: "pointer" }}
+                          />
+                          {thumbSrc ? (
+                            <img src={thumbSrc} alt={video.title} className="card-thumbnail" />
+                          ) : (
+                            <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", background: "#0c0c0e", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <svg className="w-8 h-8 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ opacity: 0.2 }}>
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                              </svg>
+                            </div>
+                          )}
+                          <span className="card-duration">{formatDuration(video.duration_seconds)}</span>
+                        </div>
+                        <div className="card-content">
+                          <h4 className="card-title" title={video.title}>
+                            {video.title}
+                          </h4>
+                          <div className="card-meta-row">
+                            <span className={`program-badge ${getProgramBadgeClass(video.program)}`}>
+                              {video.program || "Autre"}
+                            </span>
+                            {video.release && (
+                              <span className="release-badge">Rel. {video.release}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            );
-          })}
+            ))}
         </div>
       ) : (
         /* LIST VIEW */
@@ -651,6 +776,7 @@ export default function LibraryPage() {
           <table className="videos-table">
             <thead>
               <tr>
+                <th style={{ width: "36px" }}></th>
                 <th style={{ width: "80px" }}>Miniature</th>
                 <th>Titre</th>
                 <th>Programme</th>
@@ -664,6 +790,14 @@ export default function LibraryPage() {
                 const thumbSrc = getThumbnailSrc(video);
                 return (
                   <tr key={video.id} onClick={() => handleSelectVideo(video)}>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(video.id)}
+                        onChange={() => toggleSelected(video.id)}
+                        style={{ width: "18px", height: "18px", cursor: "pointer" }}
+                      />
+                    </td>
                     <td>
                       {thumbSrc ? (
                         <img src={thumbSrc} alt="" className="table-thumb" />
@@ -877,6 +1011,65 @@ export default function LibraryPage() {
                 onClick={confirmDelete}
               >
                 Confirmer la suppression
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Bulk Delete Modal (réf. UX3.9/UX5.2) */}
+      {bulkDeleteConfirm && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
+              Supprimer {selectedIds.size} vidéo(s) ?
+            </h3>
+            <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
+              Cette action est irréversible et supprimera les fichiers du disque.
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setBulkDeleteConfirm(false)}>
+                Annuler
+              </button>
+              <button type="button" className="btn btn-primary" style={{ backgroundColor: "var(--accent-error)" }} onClick={confirmBulkDelete}>
+                Confirmer la suppression
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ajout groupé à une playlist (réf. UX3.9) */}
+      {showAddToPlaylist && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
+              Ajouter {selectedIds.size} vidéo(s) à une playlist
+            </h3>
+            <select className="form-control" value={bulkTargetPlaylistId} onChange={(e) => setBulkTargetPlaylistId(e.target.value)}>
+              <option value="">Choisir une playlist...</option>
+              {playlists.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            {playlists.length === 0 && (
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: 0 }}>
+                Aucune playlist existante. Créez-en une depuis la page Playlists.
+              </p>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setShowAddToPlaylist(false);
+                  setBulkTargetPlaylistId("");
+                }}
+              >
+                Annuler
+              </button>
+              <button type="button" className="btn btn-primary" onClick={confirmBulkAddToPlaylist} disabled={!bulkTargetPlaylistId}>
+                Ajouter
               </button>
             </div>
           </div>

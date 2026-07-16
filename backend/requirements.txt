@@ -5,3 +5,5 @@ alembic
 watchdog
 python-multipart
 pydantic-settings
+apscheduler
+tzlocal

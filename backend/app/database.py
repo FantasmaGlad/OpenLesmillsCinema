@@ -24,9 +24,18 @@ def get_db():
 
 
 def init_db():
-    # Make sure all directories exist (media_dir, watch_dir, thumbnails_dir)
+    # Make sure all directories exist (media_dir, watch_dir, thumbnails_dir, ...)
     from pathlib import Path
-    for path_str in [settings.media_dir, settings.watch_dir, settings.thumbnails_dir]:
+    for path_str in [
+        settings.media_dir,
+        settings.watch_dir,
+        settings.thumbnails_dir,
+        settings.backgrounds_dir,
+        settings.backgrounds_watch_dir,
+        settings.audio_dir,
+        settings.audio_watch_dir,
+        settings.logs_dir,
+    ]:
         Path(path_str).mkdir(parents=True, exist_ok=True)
     
     # Create SQLite database file directory if needed

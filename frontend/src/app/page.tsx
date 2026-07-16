@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from "react";
 import { usePlaybackSocket } from "@/lib/usePlaybackSocket";
 import { useTimerSocket } from "@/lib/useTimerSocket";
+import { useIsMobile } from "@/lib/useIsMobile";
+import MobileRemote from "@/components/MobileRemote";
 
 interface VideoSummary {
   id: number;
@@ -17,6 +19,32 @@ interface PlaylistSummary {
   name: string;
   item_count: number;
   total_duration_seconds: number;
+}
+
+interface OccurrenceSummary {
+  schedule_id: number;
+  run_at: string;
+  title: string | null;
+  program: string | null;
+  override_action: string | null;
+}
+
+interface BackgroundSummary {
+  id: number;
+  title: string;
+}
+
+interface InterruptedState {
+  id: number;
+  cause: string | null;
+  interrupted_at: string;
+  // Forme F5.3 (cause="schedule") : lecture manuelle interrompue par une programmation.
+  video_id?: number | null;
+  title?: string | null;
+  position_seconds?: number | null;
+  // Forme F10.7 (cause="coach_priority") : programmation reportée par le mode audio coach.
+  target_type?: string | null;
+  target_id?: number | null;
 }
 
 function getApiUrl(path: string) {
@@ -69,6 +97,7 @@ const TIMER_MODE_LABELS: Record<string, string> = {
 const SPEED_OPTIONS = [0.5, 1, 1.25, 1.5, 2];
 
 export default function DashboardPage() {
+  const isMobile = useIsMobile();
   const { state, connected, sendCommand } = usePlaybackSocket();
   const { state: timerState, sendCommand: sendTimerCommand } = useTimerSocket();
   const [videos, setVideos] = useState<VideoSummary[]>([]);
@@ -78,8 +107,38 @@ export default function DashboardPage() {
   const [seekDragValue, setSeekDragValue] = useState<number | null>(null);
   const [volumeDragValue, setVolumeDragValue] = useState<number | null>(null);
   const [customMinutes, setCustomMinutes] = useState<string>("5");
+  const [interrupted, setInterrupted] = useState<InterruptedState | null>(null);
+  const [isResuming, setIsResuming] = useState(false);
+  const [upcoming, setUpcoming] = useState<OccurrenceSummary[]>([]);
+  const [backgrounds, setBackgrounds] = useState<BackgroundSummary[]>([]);
+  const [selectedBackgroundId, setSelectedBackgroundId] = useState<string>("");
+
+  const fetchInterrupted = () => {
+    fetch(getApiUrl("/playback/interrupted"), { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setInterrupted)
+      .catch(() => setInterrupted(null));
+  };
 
   useEffect(() => {
+    // Bloc « Prochainement » : les 3 prochaines occurrences actives (réf. UX3.4).
+    const now = new Date();
+    const horizon = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+    fetch(
+      getApiUrl(`/schedule/occurrences?start=${now.toISOString()}&end=${horizon.toISOString()}`),
+      { cache: "no-store" }
+    )
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: OccurrenceSummary[]) =>
+        setUpcoming(data.filter((o) => o.override_action !== "cancelled").slice(0, 3))
+      )
+      .catch(() => setUpcoming([]));
+
+    fetch(getApiUrl("/backgrounds"), { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setBackgrounds)
+      .catch(() => setBackgrounds([]));
+
     fetch(getApiUrl("/videos?sort_by=imported_at&order=desc"), { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : []))
       .then(setVideos)
@@ -89,7 +148,31 @@ export default function DashboardPage() {
       .then((res) => (res.ok ? res.json() : []))
       .then(setPlaylists)
       .catch(() => setPlaylists([]));
+
+    // F5.3 : une programmation peut interrompre une lecture manuelle à tout
+    // moment pendant que ce tableau de bord est ouvert — on vérifie donc
+    // périodiquement plutôt qu'au seul chargement de la page.
+    fetchInterrupted();
+    const id = setInterval(fetchInterrupted, 10000);
+    return () => clearInterval(id);
   }, []);
+
+  const handleResumeInterrupted = async () => {
+    setIsResuming(true);
+    try {
+      const res = await fetch(getApiUrl("/playback/interrupted/resume"), { method: "POST" });
+      if (res.ok) {
+        setInterrupted(null);
+      }
+    } finally {
+      setIsResuming(false);
+    }
+  };
+
+  const handleDismissInterrupted = async () => {
+    await fetch(getApiUrl("/playback/interrupted"), { method: "DELETE" });
+    setInterrupted(null);
+  };
 
   const isActive = state.current_video !== null || state.state === "playlist_waiting";
   const duration = state.current_video?.duration_seconds ?? 0;
@@ -118,8 +201,52 @@ export default function DashboardPage() {
     sendTimerCommand(timerState.running ? "pause" : "resume");
   };
 
+  if (isMobile) {
+    return (
+      <MobileRemote
+        state={state}
+        connected={connected}
+        sendCommand={sendCommand}
+        timerState={timerState}
+        sendTimerCommand={sendTimerCommand}
+        videos={videos}
+        playlists={playlists}
+        backgrounds={backgrounds}
+        getApiUrl={getApiUrl}
+      />
+    );
+  }
+
   return (
     <div className="dashboard-container">
+      {interrupted && (
+        <div className="interrupted-block">
+          <div className="interrupted-text">
+            {interrupted.cause === "coach_priority" ? (
+              <>
+                <span className="interrupted-label">Programmation reportée — mode audio coach actif (F10.7)</span>
+                <span className="interrupted-title">{interrupted.title ?? "Cours programmé"}</span>
+              </>
+            ) : (
+              <>
+                <span className="interrupted-label">Lecture interrompue par une programmation</span>
+                <span className="interrupted-title">
+                  {interrupted.title ?? "Cours"} — {formatTime(interrupted.position_seconds)}
+                </span>
+              </>
+            )}
+          </div>
+          <div className="interrupted-actions">
+            <button className="btn btn-primary" onClick={handleResumeInterrupted} disabled={isResuming}>
+              {isResuming ? "Reprise..." : interrupted.cause === "coach_priority" ? "Lancer maintenant" : "Reprendre"}
+            </button>
+            <button className="btn btn-secondary" onClick={handleDismissInterrupted} disabled={isResuming}>
+              Abandonner
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="live-block">
         <div className="live-header">
           <h3>En direct</h3>
@@ -198,7 +325,16 @@ export default function DashboardPage() {
               </div>
             ) : (
               <>
-                <div className="live-title">{state.current_video?.title}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                  {state.current_video?.thumbnail_url && (
+                    <img
+                      src={getApiUrl(`/thumbnails/${state.current_video.thumbnail_url}`)}
+                      alt=""
+                      style={{ width: "88px", height: "50px", objectFit: "cover", borderRadius: "var(--radius-sm)", flexShrink: 0, background: "#000" }}
+                    />
+                  )}
+                  <div className="live-title">{state.current_video?.title}</div>
+                </div>
 
                 <div className="live-progress">
                   <span className="live-time">{formatTime(displayPosition)}</span>
@@ -265,6 +401,62 @@ export default function DashboardPage() {
             Aucun cours en cours. Sélectionnez une vidéo ou une playlist ci-dessous pour la lancer.
           </div>
         )}
+      </div>
+
+      <div className="live-block">
+        <div className="live-header">
+          <h3>Prochainement</h3>
+          <a href="/schedule/" className="status-pill" style={{ textDecoration: "none" }}>
+            Voir le planning
+          </a>
+        </div>
+        {upcoming.length === 0 ? (
+          <p className="live-empty">Aucune programmation à venir.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {upcoming.map((o, idx) => (
+              <div
+                key={`${o.schedule_id}-${idx}`}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "10px 12px",
+                  background: "var(--bg-surface-elevated)",
+                  borderRadius: "var(--radius-md)",
+                  border: "1px solid var(--border-color)",
+                }}
+              >
+                <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>{o.title ?? "Cours"}</span>
+                <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", fontVariantNumeric: "tabular-nums" }}>
+                  {new Date(o.run_at).toLocaleString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="live-block">
+        <h3>Raccourcis</h3>
+        <div className="launch-row" style={{ flexWrap: "wrap" }}>
+          <select className="filter-select" style={{ flex: 1, minWidth: "180px" }} value={selectedBackgroundId} onChange={(e) => setSelectedBackgroundId(e.target.value)}>
+            <option value="">Choisir un fond animé...</option>
+            {backgrounds.map((bg) => (
+              <option key={bg.id} value={bg.id}>{bg.title}</option>
+            ))}
+          </select>
+          <button
+            className="btn btn-secondary"
+            disabled={!selectedBackgroundId}
+            onClick={() => selectedBackgroundId && sendCommand("load_background", { background_id: Number(selectedBackgroundId) })}
+          >
+            Lancer le fond
+          </button>
+          <a href="/coach/" className="btn btn-primary" style={{ textDecoration: "none", display: "flex", alignItems: "center" }}>
+            Passer en mode coach
+          </a>
+        </div>
       </div>
 
       <div className="timer-block">

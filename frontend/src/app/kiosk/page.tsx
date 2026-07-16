@@ -45,7 +45,10 @@ const PROGRAM_ACCENT: Record<string, string> = {
 
 export default function KioskPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const bgVideoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const lastReportRef = useRef(0);
+  const lastAudioReportRef = useRef(0);
   const [osd, setOsd] = useState<OsdContent>(null);
   const osdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [now, setNow] = useState(new Date());
@@ -88,14 +91,47 @@ export default function KioskPage() {
     (evt: PlaybackEvent) => {
       const { cause, data, client_ts } = evt;
       const video = videoRef.current;
+      const bgVideo = bgVideoRef.current;
+      const audio = audioRef.current;
 
       if (client_ts) {
         // Instrumentation de latence commande -> effet écran (cible < 500 ms, réf. NF4 / tâche 3.10).
         console.log(`[latence] ${cause} appliqué en ${Date.now() - client_ts} ms`);
       }
 
+      const currentTrack =
+        data.audio_tracks && data.audio_track_index !== null && data.audio_track_index !== undefined
+          ? data.audio_tracks[data.audio_track_index]
+          : null;
+      const backgroundId = data.current_background?.id ?? data.current_audio_course?.background_id ?? null;
+
+      const syncAudioToTrack = (resetTime: boolean) => {
+        if (!audio || !currentTrack) return;
+        const src = getApiUrl(`/audio/tracks/${currentTrack.id}/stream`);
+        if (!audio.src || !audio.src.endsWith(src)) {
+          audio.src = src;
+          audio.load();
+        }
+        if (resetTime) audio.currentTime = 0;
+        audio.volume = data.volume / 100;
+        if (data.audio_playing) audio.play().catch(() => {});
+        else audio.pause();
+      };
+
       switch (cause) {
         case "sync": {
+          if (backgroundId && bgVideo) {
+            const bgSrc = getApiUrl(`/backgrounds/${backgroundId}/stream`);
+            if (!bgVideo.src || !bgVideo.src.endsWith(bgSrc)) bgVideo.src = bgSrc;
+            bgVideo.play().catch(() => {});
+          }
+          if (data.current_audio_course && audio && currentTrack) {
+            const aSrc = getApiUrl(`/audio/tracks/${currentTrack.id}/stream`);
+            if (!audio.src || !audio.src.endsWith(aSrc)) audio.src = aSrc;
+            audio.currentTime = data.audio_position_seconds;
+            audio.volume = data.volume / 100;
+            if (data.audio_playing) audio.play().catch(() => {});
+          }
           if (!video || !data.current_video) break;
           const src = getApiUrl(`/videos/${data.current_video.id}/stream`);
           if (!video.src || !video.src.endsWith(src)) video.src = src;
@@ -114,18 +150,53 @@ export default function KioskPage() {
           video.load();
           break;
         }
+        case "load_background": {
+          if (!bgVideo || !data.current_background) break;
+          bgVideo.src = getApiUrl(`/backgrounds/${data.current_background.id}/stream`);
+          bgVideo.load();
+          bgVideo.play().catch(() => {});
+          break;
+        }
+        case "load_audio_course": {
+          if (backgroundId && bgVideo) {
+            const bgSrc = getApiUrl(`/backgrounds/${backgroundId}/stream`);
+            bgVideo.src = bgSrc;
+            bgVideo.load();
+            bgVideo.play().catch(() => {});
+          }
+          syncAudioToTrack(true);
+          break;
+        }
+        case "audio_next_track":
+        case "audio_previous_track":
+        case "audio_jump_to_track":
+        case "audio_restart_track":
+          syncAudioToTrack(true);
+          break;
         case "countdown_end":
         case "play":
-          video?.play().catch(() => {});
+          if (data.current_audio_course) audio?.play().catch(() => {});
+          else video?.play().catch(() => {});
           break;
         case "pause":
-          video?.pause();
+          if (data.current_audio_course) audio?.pause();
+          else video?.pause();
           break;
         case "stop":
           if (video) {
             video.pause();
             video.removeAttribute("src");
             video.load();
+          }
+          if (bgVideo) {
+            bgVideo.pause();
+            bgVideo.removeAttribute("src");
+            bgVideo.load();
+          }
+          if (audio) {
+            audio.pause();
+            audio.removeAttribute("src");
+            audio.load();
           }
           break;
         case "seek":
@@ -137,6 +208,7 @@ export default function KioskPage() {
           break;
         case "volume":
           if (video) video.volume = data.volume / 100;
+          if (audio) audio.volume = data.volume / 100;
           showOsd({ icon: "🔊", label: `${data.volume}%` });
           break;
         case "speed":
@@ -163,11 +235,30 @@ export default function KioskPage() {
     }
   };
 
-  const program = state.current_video?.program ?? undefined;
+  const handleAudioTimeUpdate = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const t = Date.now();
+    if (t - lastAudioReportRef.current > 1000) {
+      lastAudioReportRef.current = t;
+      sendCommand("audio_report_position", { position_seconds: audio.currentTime });
+    }
+  };
+
+  const program = state.current_video?.program ?? state.current_audio_course?.program ?? undefined;
   const programAccent = (program && PROGRAM_ACCENT[program]) || "var(--accent-primary)";
   const isIdle = state.state === "waiting" || state.state === "offline";
   const isVideoLayer = state.state === "playing" || state.state === "paused";
   const isPaused = state.state === "paused";
+  const isCoachMode = state.state === "coach_mode";
+  const coachBackgroundId = state.current_audio_course?.background_id ?? null;
+  const currentTrack =
+    state.audio_tracks && state.audio_track_index !== null && state.audio_track_index !== undefined
+      ? state.audio_tracks[state.audio_track_index]
+      : null;
+  const audioTrackRemaining = currentTrack?.duration_seconds
+    ? Math.max(0, currentTrack.duration_seconds - state.audio_position_seconds)
+    : null;
 
   const nextCourseRemaining = nextCourse
     ? Math.max(0, (new Date(nextCourse.run_at).getTime() - now.getTime()) / 1000)
@@ -236,6 +327,47 @@ export default function KioskPage() {
           onEnded={() => sendCommand("video_ended")}
           playsInline
         />
+      </div>
+
+      <div
+        className={`kiosk-layer kiosk-video-layer ${
+          state.state === "background" || (isCoachMode && coachBackgroundId) ? "visible" : ""
+        }`}
+      >
+        <video ref={bgVideoRef} className="kiosk-video" loop muted playsInline autoPlay />
+      </div>
+
+      <div className={`kiosk-layer kiosk-coach-mode ${isCoachMode ? "visible" : ""}`}>
+        <audio
+          ref={audioRef}
+          onTimeUpdate={handleAudioTimeUpdate}
+          onEnded={() => sendCommand("audio_track_ended")}
+        />
+        <div className="coach-habillage" style={{ borderColor: programAccent }}>
+          <span className="coach-course-title" style={{ color: programAccent }}>
+            {state.current_audio_course?.title}
+          </span>
+          {currentTrack ? (
+            <>
+              <span className="coach-track-label">
+                Piste {(state.audio_track_index ?? 0) + 1}
+                {state.audio_tracks ? ` / ${state.audio_tracks.length}` : ""}
+              </span>
+              <span className="coach-track-title">{currentTrack.title}</span>
+              <span className="coach-track-remaining">
+                {audioTrackRemaining !== null ? `- ${formatTime(audioTrackRemaining)}` : "--:--"}
+              </span>
+              {!state.audio_playing && <span className="coach-paused-badge">PAUSE</span>}
+              {state.audio_chain_wait_remaining !== null && (
+                <span className="coach-track-label">
+                  Piste suivante dans {Math.ceil(state.audio_chain_wait_remaining ?? 0)} s
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="coach-track-label">Aucune piste</span>
+          )}
+        </div>
       </div>
 
       {isPaused && (

@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePlaybackSocket } from "@/lib/usePlaybackSocket";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
@@ -19,9 +20,17 @@ const SCREEN_STATE_LABELS: Record<string, string> = {
 
 export default function ClientLayout({ children }: ClientLayoutProps) {
   const pathname = usePathname();
+  const isMobile = useIsMobile();
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [watcherStatus] = useState<string>("Actif");
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
   const { state: playbackState, connected: playbackConnected } = usePlaybackSocket();
+
+  // La navigation ferme le tiroir mobile automatiquement (réf. UX4.1).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronise l'état du tiroir avec le système de routing externe (Next.js), pas un simple calcul dérivable au rendu
+    setDrawerOpen(false);
+  }, [pathname]);
 
   // Détecter l'URL API correcte
   const getApiUrl = (path: string) => {
@@ -131,8 +140,9 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
     },
   ];
 
-  // L'écran kiosk (cinéma) n'a ni sidebar ni en-tête d'administration : plein écran uniquement.
-  if (pathname === "/kiosk") {
+  // L'écran kiosk (cinéma) et le mode coach mobile n'ont ni sidebar ni
+  // en-tête d'administration : plein écran dédié uniquement (réf. UX4.5).
+  if (pathname === "/kiosk" || pathname === "/kiosk/" || pathname === "/coach" || pathname === "/coach/") {
     return <>{children}</>;
   }
 
@@ -147,6 +157,51 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
     : playbackState.state === "playing"
     ? "active"
     : "attente";
+
+  const allLinks = [...navLinks, ...footerLinks];
+
+  if (isMobile) {
+    // Réf. UX4.1 : pas de navigation permanente visible sur mobile — l'écran
+    // principal (la page courante, généralement la télécommande) occupe tout
+    // l'espace, la navigation reste dans un tiroir discret (burger).
+    return (
+      <div className="mobile-app-container">
+        <header className="mobile-topbar">
+          <button className="mobile-burger-btn" onClick={() => setDrawerOpen(true)} aria-label="Ouvrir le menu">
+            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <span className="mobile-topbar-brand">LM CINEMA</span>
+          <div className={`status-dot ${screenDotClass}`} title={screenLabel} />
+        </header>
+
+        <main className="mobile-page-content">{children}</main>
+
+        {drawerOpen && (
+          <>
+            <div className="mobile-drawer-overlay" onClick={() => setDrawerOpen(false)} />
+            <div className="mobile-drawer">
+              <div className="sidebar-brand">
+                <span className="brand-logo">LM CINEMA</span>
+              </div>
+              <nav className="mobile-drawer-nav">
+                {allLinks.map((link) => {
+                  const isActive = pathname === link.href || (link.href !== "/" && pathname.startsWith(link.href));
+                  return (
+                    <Link key={link.href} href={link.href} className={`nav-link ${isActive ? "active" : ""}`}>
+                      {link.icon}
+                      <span>{link.label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="app-container">

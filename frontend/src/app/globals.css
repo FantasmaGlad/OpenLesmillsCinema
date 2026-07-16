@@ -1500,4 +1500,805 @@ h1, h2, h3, h4, h5, h6 {
   gap: 16px;
 }
 
+/* ============================================================
+   Planning — Programmation horaire (Lot 6)
+   ============================================================ */
+.schedule-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  height: 100%;
+  min-height: 0;
+}
+
+.schedule-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.week-nav-label {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--text-main);
+  min-width: 220px;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+.schedule-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.schedule-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.schedule-day-column {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  min-height: 0;
+}
+
+.schedule-day-column.today {
+  border-color: var(--accent-primary);
+}
+
+.schedule-day-header {
+  padding: 10px 12px;
+  text-align: center;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.schedule-day-header-name {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.schedule-day-column.today .schedule-day-header-name {
+  color: var(--accent-primary);
+}
+
+.schedule-day-header-date {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text-main);
+  margin-top: 2px;
+}
+
+.schedule-day-body {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: background var(--transition-fast);
+}
+
+.schedule-day-body.drag-over {
+  background: rgba(228, 0, 43, 0.05);
+  outline: 2px dashed var(--accent-primary);
+  outline-offset: -2px;
+}
+
+.schedule-day-empty-hint {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  text-align: center;
+  padding: 12px 4px;
+}
+
+.schedule-occurrence-chip {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.schedule-occurrence-chip:hover {
+  border-color: var(--border-focus);
+  transform: translateY(-1px);
+}
+
+.schedule-occurrence-chip.cancelled {
+  opacity: 0.5;
+}
+
+.schedule-occurrence-chip.cancelled .schedule-occurrence-title {
+  text-decoration: line-through;
+}
+
+.schedule-occurrence-time {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-occurrence-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-occurrence-badge {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-warning);
+}
+
+.schedule-occurrence-actions {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.schedule-occurrence-actions button {
+  width: 100%;
+  height: 26px;
+  font-size: 0.7rem;
+  padding: 0 8px;
+}
+
+/* Vue liste chronologique alternative (UX3.16) */
+.schedule-list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.schedule-list-day-label {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 14px 4px 8px;
+}
+
+/* Bannière de reprise après interruption par une programmation (F5.3) */
+.interrupted-block {
+  background: var(--bg-surface);
+  border: 1px solid rgba(255, 159, 10, 0.35);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.interrupted-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.interrupted-label {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-warning);
+}
+
+.interrupted-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.interrupted-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ============================================================
+   Mode audio coach — écran kiosk (Lot 8, réf. F10.5/UX2.13)
+   ============================================================ */
+.kiosk-coach-mode {
+  background: radial-gradient(circle at center, #101014 0%, #020203 100%);
+}
+
+.coach-habillage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 48px 64px;
+  border: 1px solid;
+  border-radius: var(--radius-lg);
+  background: rgba(10, 10, 10, 0.5);
+  backdrop-filter: blur(6px);
+}
+
+.coach-course-title {
+  font-family: var(--font-title);
+  font-size: 2rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.coach-track-label {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-weight: 700;
+  margin-top: 12px;
+}
+
+.coach-track-title {
+  font-family: var(--font-title);
+  font-size: 4.5rem;
+  font-weight: 900;
+  color: var(--text-main);
+  text-align: center;
+  line-height: 1.1;
+}
+
+.coach-track-remaining {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+
+.coach-paused-badge {
+  margin-top: 8px;
+  font-family: var(--font-title);
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: 0.3em;
+  color: var(--accent-warning);
+}
+
+/* ============================================================
+   Mode coach mobile — écran dédié /coach (Lot 8, réf. UX4.5-4.9)
+   Cibles tactiles >= 64px partout sur cet écran (réf. UX6.1).
+   ============================================================ */
+.coach-screen {
+  min-height: 100vh;
+  width: 100%;
+  background: var(--bg-main);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* Écran de sélection (2e tap, réf. UX4.9) */
+.coach-picker-screen {
+  padding: 24px;
+  gap: 20px;
+}
+
+.coach-picker-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.coach-picker-title {
+  font-size: 1.6rem;
+}
+
+.coach-picker-subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.coach-picker-search {
+  width: 100%;
+}
+
+.coach-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.coach-course-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.coach-course-item:active {
+  background: var(--bg-surface-hover);
+}
+
+.coach-course-item-accent {
+  width: 6px;
+  align-self: stretch;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.coach-course-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.coach-course-item-title {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text-main);
+}
+
+.coach-course-item-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Écran de contrôle live (mode coach actif) */
+.coach-live-screen {
+  padding: 24px 20px 40px;
+  gap: 20px;
+  border-top: 6px solid;
+  align-items: center;
+  text-align: center;
+}
+
+.coach-live-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.coach-live-course-title {
+  font-family: var(--font-title);
+  font-size: 1.3rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.coach-icon-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.coach-live-track-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.coach-live-track-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+}
+
+.coach-live-track-title {
+  font-family: var(--font-title);
+  font-size: 2.4rem;
+  font-weight: 900;
+  color: var(--text-main);
+  line-height: 1.15;
+}
+
+.coach-live-track-time {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+
+.coach-controls-grid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.coach-btn {
+  min-height: 64px;
+  min-width: 64px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.coach-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.coach-btn-main {
+  min-height: 96px;
+  min-width: 96px;
+  border-radius: 50%;
+  font-size: 2.2rem;
+  color: #fff;
+  border: none;
+}
+
+.coach-btn-wide {
+  width: 100%;
+  max-width: 360px;
+  font-size: 1rem;
+  font-weight: 700;
+  gap: 10px;
+}
+
+.coach-btn-square {
+  min-height: 64px;
+  min-width: 64px;
+  border-radius: var(--radius-md);
+}
+
+.coach-volume-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.coach-volume-value {
+  flex: 1;
+  text-align: center;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.coach-chain-mode-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.coach-tracklist-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+  min-height: 48px;
+  padding: 0 16px;
+  cursor: pointer;
+}
+
+.coach-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+}
+
+.coach-sheet {
+  width: 100%;
+  max-height: 70vh;
+  background: var(--bg-surface);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  padding: 12px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  animation: slideInRight var(--transition-normal);
+}
+
+.coach-sheet-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-color);
+  align-self: center;
+  margin-bottom: 12px;
+}
+
+.coach-sheet-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.coach-sheet-track {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 64px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0 16px;
+  color: var(--text-main);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.coach-sheet-track.active {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+/* ============================================================
+   Coquille mobile — menu burger (Lot 10, réf. UX4.1/UX4.4)
+   Pas de sidebar permanente sur mobile : l'écran principal est dédié
+   au contrôle, la navigation reste dans un tiroir discret.
+   ============================================================ */
+.mobile-app-container {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-main);
+}
+
+.mobile-topbar {
+  height: 52px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-surface);
+}
+
+.mobile-burger-btn {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.mobile-topbar-brand {
+  font-family: var(--font-title);
+  font-size: 0.95rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.mobile-page-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 300;
+}
+
+.mobile-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 280px;
+  max-width: 82vw;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-color);
+  z-index: 301;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 12px;
+  animation: fadeIn var(--transition-fast);
+}
+
+.mobile-drawer-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 24px;
+}
+
+.mobile-drawer-nav .nav-link {
+  min-height: 48px;
+}
+
+/* Contre la règle @media(max-width:900px) plus haut qui masque les libellés
+   et fait perdre toute contrainte de taille aux icônes SVG (censée ne
+   s'appliquer qu'à la sidebar PC réduite en mode icônes, pas au tiroir
+   mobile où les libellés doivent au contraire rester visibles). Sélecteur
+   volontairement plus spécifique pour l'emporter sans !important. */
+.mobile-drawer-nav .nav-link svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.mobile-drawer-nav .nav-link span {
+  display: inline;
+}
+
+/* ============================================================
+   Télécommande mobile plein écran (Lot 10, réf. UX4.1-UX4.4)
+   Cibles tactiles >= 64px sur cet écran (réf. UX6.1).
+   ============================================================ */
+.mobile-remote {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px 16px 28px;
+  align-items: center;
+}
+
+.mobile-remote-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  text-align: center;
+  gap: 8px;
+}
+
+.mobile-remote-now {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.mobile-remote-thumb {
+  width: 72px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: #000;
+  flex-shrink: 0;
+}
+
+.mobile-remote-title {
+  font-family: var(--font-title);
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--text-main);
+  line-height: 1.2;
+}
+
+.mobile-remote-progress {
+  width: 100%;
+}
+
+.mobile-remote-seek {
+  width: 100%;
+  height: 10px;
+}
+
+.mobile-remote-time-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-top: 4px;
+}
+
+.mobile-remote-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  margin-top: auto;
+}
+
+.mobile-remote-stop {
+  width: 100%;
+  max-width: 360px;
+  font-size: 0.95rem;
+  color: var(--accent-error);
+  transition: background var(--transition-fast);
+}
+
+.mobile-remote-stop.holding {
+  background: rgba(255, 69, 58, 0.25);
+  border-color: var(--accent-error);
+}
+
+.mobile-remote-quick-row {
+  width: 100%;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mobile-remote-quick-btn {
+  flex: 1;
+  min-width: 100px;
+  min-height: 64px;
+  text-align: center;
+  justify-content: center;
+}
 

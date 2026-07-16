@@ -150,11 +150,23 @@ class ScheduleOverride(Base):
 
 
 class PlaybackState(Base):
+    """Mémorise une action différée en attente de reprise ou de relance
+    manuelle depuis l'interface. Deux formes selon `cause` :
+    - "schedule" (F5.3) : lecture manuelle interrompue par une programmation
+      -> `video_id`/`position_seconds` renseignés, reprise à la position exacte.
+    - "coach_priority" (F10.7) : programmation qui n'a PAS pu démarrer car le
+      mode audio coach était actif -> `target_type`/`target_id` renseignés
+      (cible jamais lancée, donc pas de position), relance depuis zéro.
+    Une seule ligne à la fois quelle que soit la cause (la plus récente
+    remplace la précédente non traitée), cf. scheduler_manager._launch_target.
+    """
     __tablename__ = "playback_state"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     video_id: Mapped[int | None] = mapped_column(ForeignKey("videos.id"))
     position_seconds: Mapped[float | None]
+    target_type: Mapped[str | None]
+    target_id: Mapped[int | None]
     cause: Mapped[str | None]
     interrupted_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
