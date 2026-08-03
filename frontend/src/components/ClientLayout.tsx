@@ -5,26 +5,54 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePlaybackSocket } from "@/lib/usePlaybackSocket";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { useAppSettings } from "@/lib/AppSettingsContext";
+import { useAutoFullscreen } from "@/lib/useAutoFullscreen";
+import { useClickSound } from "@/lib/useClickSound";
+import { navLinks as navLinkConfigs, footerNavLinks as footerNavLinkConfigs } from "@/lib/navLinks";
+import Icon from "@/components/Icon";
+import AppLogo from "@/components/AppLogo";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
 }
 
-const SCREEN_STATE_LABELS: Record<string, string> = {
-  waiting: "Attente",
-  countdown: "Compte à rebours",
-  paused: "Pause",
-  coach_mode: "Mode coach",
-  offline: "Hors ligne",
-};
+/**
+ * Un lien de nav est actif sur sa propre page ET ses sous-pages, mais pas sur
+ * une AUTRE page dont le chemin partage juste le même préfixe textuel (bug
+ * "Playlists audio sélectionne aussi Cours audio" : "/audio-playlists/"
+ * commence bien par "/audio" en tant que chaîne, sans être une sous-page de
+ * "/audio/"). On exige donc une frontière de segment (`/`) après le préfixe.
+ */
+function isNavLinkActive(pathname: string, href: string): boolean {
+  return pathname === href || pathname === `${href}/` || pathname.startsWith(`${href}/`);
+}
 
 export default function ClientLayout({ children }: ClientLayoutProps) {
   const pathname = usePathname();
   const isMobile = useIsMobile();
+  const { t } = useAppSettings();
   const [isOnline, setIsOnline] = useState<boolean>(true);
-  const [watcherStatus] = useState<string>("Actif");
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
   const { state: playbackState, connected: playbackConnected } = usePlaybackSocket();
+  // Réf. mission UI/UX — "plein écran de base sur mobile" : demande le
+  // plein écran navigateur dès le premier tap (le remote/coach mobile n'a
+  // aucune raison de garder la barre d'adresse visible).
+  useAutoFullscreen(isMobile);
+  // Son de clic (réf. mission UI/UX) : uniquement dans le studio admin, pas
+  // sur l'écran cinéma/kiosk ni le mode coach (appels de hooks toujours
+  // inconditionnels, seul `enabled` varie selon la route).
+  const isFullscreenRoute =
+    pathname === "/kiosk" || pathname === "/kiosk/" ||
+    pathname === "/cinema" || pathname === "/cinema/" ||
+    pathname === "/coach" || pathname === "/coach/";
+  useClickSound(!isFullscreenRoute);
+
+  const SCREEN_STATE_LABELS: Record<string, string> = {
+    waiting: t("playbackState.waiting"),
+    paused: t("playbackState.paused"),
+    coach_mode: t("playbackState.coach_mode"),
+    offline: t("playbackState.offline"),
+  };
 
   // La navigation ferme le tiroir mobile automatiquement (réf. UX4.1).
   useEffect(() => {
@@ -36,7 +64,7 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
   const getApiUrl = (path: string) => {
     if (typeof window !== "undefined") {
       if (window.location.port === "3000") {
-        return `http://localhost:8000/api${path}`;
+        return `http://localhost:8001/api${path}`;
       }
     }
     return `/api${path}`;
@@ -57,99 +85,30 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
     };
 
     checkHealth();
-    const interval = setInterval(checkHealth, 5000);
+    // 30 s : suffisant pour détecter une panne sans surcharger le serveur
+    // (le kiosque a ses propres timers indépendants dans kiosk/page.tsx)
+    const interval = setInterval(checkHealth, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  const navLinks = [
-    {
-      href: "/",
-      label: "Tableau de bord",
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z" />
-        </svg>
-      ),
-    },
-    {
-      href: "/library",
-      label: "Bibliothèque",
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
-      ),
-    },
-    {
-      href: "/audio",
-      label: "Cours audio",
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-        </svg>
-      ),
-    },
-    {
-      href: "/backgrounds",
-      label: "Fonds animés",
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-        </svg>
-      ),
-    },
-    {
-      href: "/playlists",
-      label: "Playlists",
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h12" />
-        </svg>
-      ),
-    },
-    {
-      href: "/schedule",
-      label: "Planning",
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-        </svg>
-      ),
-    },
-  ];
+  // Réf. mission UI/UX — icônes Google Material Symbols reprises telles
+  // quelles du design importé (surface "PC Admin") plutôt que les SVG
+  // Heroicons d'origine, pour une identité visuelle cohérente avec le reste
+  // de la refonte.
+  const navLinks = navLinkConfigs.map((link) => ({ ...link, label: t(link.labelKey) }));
+  const footerLinks = footerNavLinkConfigs.map((link) => ({ ...link, label: t(link.labelKey) }));
 
-  const footerLinks = [
-    {
-      href: "/settings",
-      label: "Paramètres",
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      ),
-    },
-    {
-      href: "/logs",
-      label: "Logs",
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-      ),
-    },
-  ];
-
-  // L'écran kiosk (cinéma) et le mode coach mobile n'ont ni sidebar ni
-  // en-tête d'administration : plein écran dédié uniquement (réf. UX4.5).
-  if (pathname === "/kiosk" || pathname === "/kiosk/" || pathname === "/coach" || pathname === "/coach/") {
+  // L'écran kiosk, l'interface cinéma adhérents et le mode coach mobile
+  // n'ont ni sidebar ni en-tête d'administration : plein écran dédié
+  // uniquement (réf. UX4.5).
+  if (isFullscreenRoute) {
     return <>{children}</>;
   }
 
   const screenLabel = !playbackConnected
-    ? "Hors ligne"
+    ? t("playbackState.offline")
     : playbackState.state === "playing"
-    ? `Lecture : ${playbackState.current_video?.title ?? ""}`
+    ? t("playbackState.playing", { title: playbackState.current_video?.title ?? "" })
     : SCREEN_STATE_LABELS[playbackState.state] ?? playbackState.state;
 
   const screenDotClass = !playbackConnected
@@ -167,13 +126,11 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
     return (
       <div className="mobile-app-container">
         <header className="mobile-topbar">
-          <button className="mobile-burger-btn" onClick={() => setDrawerOpen(true)} aria-label="Ouvrir le menu">
-            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+          <button className="mobile-burger-btn olc-press" onClick={() => setDrawerOpen(true)} aria-label={t("nav.openMenu")}>
+            <Icon name="menu" size={24} />
           </button>
-          <span className="mobile-topbar-brand">LM CINEMA</span>
-          <div className={`status-dot ${screenDotClass}`} title={screenLabel} />
+          <AppLogo size={32} className="mobile-topbar-logo" />
+          <div className={`status-dot ${screenDotClass} ${screenDotClass === "active" ? "olc-live-dot" : ""}`} title={screenLabel} />
         </header>
 
         <main className="mobile-page-content">{children}</main>
@@ -183,14 +140,19 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
             <div className="mobile-drawer-overlay" onClick={() => setDrawerOpen(false)} />
             <div className="mobile-drawer">
               <div className="sidebar-brand">
-                <span className="brand-logo">LM CINEMA</span>
+                <AppLogo size={72} className="brand-logo" />
               </div>
               <nav className="mobile-drawer-nav">
-                {allLinks.map((link) => {
-                  const isActive = pathname === link.href || (link.href !== "/" && pathname.startsWith(link.href));
+                {allLinks.map((link, i) => {
+                  const isActive = link.href === "/" ? pathname === "/" : isNavLinkActive(pathname, link.href);
                   return (
-                    <Link key={link.href} href={link.href} className={`nav-link ${isActive ? "active" : ""}`}>
-                      {link.icon}
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      className={`nav-link olc-press olc-anim-in ${isActive ? "active" : ""}`}
+                      style={{ animationDelay: `${i * 30}ms` }}
+                    >
+                      <Icon name={link.iconName} size={20} />
                       <span>{link.label}</span>
                     </Link>
                   );
@@ -209,18 +171,19 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
       <aside className="app-sidebar">
         <div>
           <div className="sidebar-brand">
-            <span className="brand-logo">LM CINEMA</span>
+            <AppLogo size={72} className="brand-logo" />
           </div>
           <nav className="sidebar-nav">
-            {navLinks.map((link) => {
-              const isActive = pathname === link.href || (link.href !== "/" && pathname.startsWith(link.href));
+            {navLinks.map((link, i) => {
+              const isActive = link.href === "/" ? pathname === "/" : isNavLinkActive(pathname, link.href);
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`nav-link ${isActive ? "active" : ""}`}
+                  className={`nav-link olc-press olc-anim-in ${isActive ? "active" : ""}`}
+                  style={{ animationDelay: `${i * 30}ms` }}
                 >
-                  {link.icon}
+                  <Icon name={link.iconName} size={20} />
                   <span>{link.label}</span>
                 </Link>
               );
@@ -229,15 +192,16 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
         </div>
 
         <div className="sidebar-footer">
-          {footerLinks.map((link) => {
-            const isActive = pathname === link.href || pathname.startsWith(link.href);
+          {footerLinks.map((link, i) => {
+            const isActive = link.href === "/" ? pathname === "/" : isNavLinkActive(pathname, link.href);
             return (
               <Link
                 key={link.href}
                 href={link.href}
-                className={`nav-link ${isActive ? "active" : ""}`}
+                className={`nav-link olc-press olc-anim-in ${isActive ? "active" : ""}`}
+                style={{ animationDelay: `${(navLinks.length + i) * 30}ms` }}
               >
-                {link.icon}
+                <Icon name={link.iconName} size={20} />
                 <span>{link.label}</span>
               </Link>
             );
@@ -251,36 +215,40 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
         <header className="app-header">
           <div>
             <h2 style={{ fontSize: "1.1rem", margin: 0 }}>
-              {pathname === "/"
-                ? "Tableau de bord"
+              {pathname === "/" || pathname.startsWith("/dashboard-cable")
+                ? t("nav.dashboardCable")
+                : pathname.startsWith("/dashboard-network")
+                ? t("nav.dashboardNetwork")
                 : pathname.startsWith("/library")
-                ? "Bibliothèque Vidéo"
+                ? t("header.libraryTitle")
+                : pathname.startsWith("/audio-playlists")
+                ? t("nav.audioPlaylists")
                 : pathname.startsWith("/audio")
-                ? "Cours Audio"
+                ? t("header.audioTitle")
                 : pathname.startsWith("/backgrounds")
-                ? "Fonds Animés"
+                ? t("header.backgroundsTitle")
                 : pathname.startsWith("/playlists")
-                ? "Playlists"
+                ? t("nav.playlists")
                 : pathname.startsWith("/schedule")
-                ? "Planning"
+                ? t("header.scheduleTitle")
                 : pathname.startsWith("/settings")
-                ? "Paramètres"
-                : "OpenLesmillsCinema"}
+                ? t("header.settingsTitle")
+                : t("header.appName")}
             </h2>
           </div>
 
           <div className="status-indicator">
             <div className="status-details" style={{ marginRight: "16px", textAlign: "right" }}>
-              <span className="status-label">Watcher Dossier</span>
-              <span className="status-val">{isOnline ? watcherStatus : "Inactif"}</span>
+              <span className="status-label">{t("header.watcherLabel")}</span>
+              <span className="status-val">{isOnline ? t("header.watcherActive") : t("header.watcherInactive")}</span>
             </div>
             <div className="status-details" style={{ marginRight: "24px", textAlign: "right" }}>
-              <span className="status-label">Écran Cinéma</span>
+              <span className="status-label">{t("header.screenLabel")}</span>
               <span className="status-val">{screenLabel}</span>
             </div>
             <div
-              className={`status-dot ${screenDotClass}`}
-              title={playbackConnected ? "Écran cinéma connecté" : "Écran cinéma hors ligne"}
+              className={`status-dot ${screenDotClass} ${screenDotClass === "active" ? "olc-live-dot" : ""}`}
+              title={playbackConnected ? t("header.screenOnline") : t("header.screenOffline")}
             />
           </div>
         </header>

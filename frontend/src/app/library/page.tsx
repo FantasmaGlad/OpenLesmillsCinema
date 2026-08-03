@@ -1,6 +1,9 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
+import { useAppSettings } from "@/lib/AppSettingsContext";
+import { useUploadManager, PendingUploadSpec } from "@/lib/UploadManager";
+import Icon from "@/components/Icon";
 
 interface Video {
   id: number;
@@ -22,6 +25,7 @@ interface ToastState {
 }
 
 export default function LibraryPage() {
+  const { t } = useAppSettings();
   const [videos, setVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -42,15 +46,13 @@ export default function LibraryPage() {
   const [drawerRelease, setDrawerRelease] = useState<string>("");
   const [isSavingDrawer, setIsSavingDrawer] = useState<boolean>(false);
 
-  // Upload States
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadTitle, setUploadTitle] = useState<string>("");
-  const [uploadProgramPreset, setUploadProgramPreset] = useState<string>("RPM");
-  const [uploadCustomProgram, setUploadCustomProgram] = useState<string>("");
-  const [uploadRelease, setUploadRelease] = useState<string>("");
-  const [uploadProgress, setUploadProgress] = useState<number>(-1); // -1 means no active upload
+  // Drag-and-drop zone
   const [dragActive, setDragActive] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Mini-formulaires pour préparer les métadonnées avant l'upload (P3).
+  // Chaque entrée correspond à un fichier sélectionné mais pas encore envoyé.
+  const [pendingSpecs, setPendingSpecs] = useState<Array<PendingUploadSpec & { key: string }>>([]);
 
   // Delete modal confirmation
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
@@ -70,11 +72,19 @@ export default function LibraryPage() {
   const getApiUrl = (path: string) => {
     if (typeof window !== "undefined") {
       if (window.location.port === "3000") {
-        return `http://localhost:8000/api${path}`;
+        return `http://localhost:8001/api${path}`;
       }
     }
     return `/api${path}`;
   };
+
+  // Upload Manager global (P3)
+  const { addUploads, uploads } = useUploadManager();
+  // Réf. mission "voir en direct les importations" : `seenDoneIds` évite de
+  // redéclencher un fetch à chaque tick de polling tant qu'aucune tâche
+  // vidéo n'a nouvellement terminé (effet déclaré plus bas, après
+  // `fetchVideos`).
+  const seenDoneIds = useRef<Set<string>>(new Set());
 
   // Show toast helper
   const showToast = (message: string, type: "success" | "error" | "warning" = "success") => {
@@ -93,6 +103,7 @@ export default function LibraryPage() {
 
   // Load videos
   const fetchVideos = async () => {
+    await Promise.resolve();
     setLoading(true);
     try {
       const queryParams = new URLSearchParams();
@@ -109,17 +120,33 @@ export default function LibraryPage() {
         const data = await res.json();
         setVideos(data);
       } else {
-        showToast("Erreur lors de la récupération des vidéos", "error");
+        showToast(t("library.fetchError"), "error");
       }
-    } catch (err) {
-      showToast("Impossible de se connecter au serveur", "error");
+    } catch {
+      showToast(t("library.connectionError"), "error");
     } finally {
       setLoading(false);
     }
   };
 
+  // Rafraîchit la bibliothèque dès qu'un import vidéo se termine (réf.
+  // mission "voir en direct les importations") : les imports sont désormais
+  // traités en arrière-plan (réponse HTTP 202 immédiate), sans ce suivi la
+  // nouvelle vidéo n'apparaissait qu'après une action manuelle (changement
+  // de filtre/tri).
+  useEffect(() => {
+    const newlyDone = uploads.filter(
+      (u) => u.kind === "video" && u.status === "done" && !seenDoneIds.current.has(u.id)
+    );
+    if (newlyDone.length === 0) return;
+    newlyDone.forEach((u) => seenDoneIds.current.add(u.id));
+    fetchVideos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploads]);
+
   // Fetch videos on filter/search change
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchVideos();
   }, [search, programFilter, releaseFilter, sortBy]);
 
@@ -145,7 +172,12 @@ export default function LibraryPage() {
     const ids = Array.from(selectedIds);
     const results = await Promise.allSettled(ids.map((id) => fetch(getApiUrl(`/videos/${id}`), { method: "DELETE" })));
     const failed = results.filter((r) => r.status === "rejected").length;
-    showToast(failed > 0 ? `${ids.length - failed}/${ids.length} vidéos supprimées` : `${ids.length} vidéo(s) supprimée(s)`, failed > 0 ? "warning" : "success");
+    showToast(
+      failed > 0
+        ? t("library.bulkDeletedPartial", { ok: ids.length - failed, total: ids.length })
+        : t("library.bulkDeletedAll", { count: ids.length }),
+      failed > 0 ? "warning" : "success"
+    );
     setBulkDeleteConfirm(false);
     clearSelection();
     fetchVideos();
@@ -170,15 +202,15 @@ export default function LibraryPage() {
         body: JSON.stringify({ name: playlist.name, items: newItems }),
       });
       if (putRes.ok) {
-        showToast(`${selectedIds.size} vidéo(s) ajoutée(s) à « ${playlist.name} »`);
+        showToast(t("library.addedToPlaylist", { count: selectedIds.size, name: playlist.name }));
         setShowAddToPlaylist(false);
         setBulkTargetPlaylistId("");
         clearSelection();
       } else {
-        showToast("Erreur lors de l'ajout à la playlist", "error");
+        showToast(t("library.addToPlaylistError"), "error");
       }
     } catch {
-      showToast("Erreur lors de l'ajout à la playlist", "error");
+      showToast(t("library.addToPlaylistError"), "error");
     }
   };
 
@@ -231,8 +263,8 @@ export default function LibraryPage() {
 
       if (res.ok) {
         const updatedVideo = await res.json();
-        showToast("Métadonnées enregistrées avec succès !");
-        
+        showToast(t("library.metadataSaved"));
+
         // Update video list in place
         setVideos((prev) =>
           prev.map((v) => (v.id === updatedVideo.id ? updatedVideo : v))
@@ -240,10 +272,10 @@ export default function LibraryPage() {
         setSelectedVideo(updatedVideo);
       } else {
         const errData = await res.json();
-        showToast(`Erreur : ${errData.detail || "Sauvegarde impossible"}`, "error");
+        showToast(t("library.saveErrorDetail", { detail: errData.detail || t("library.saveErrorFallback") }), "error");
       }
-    } catch (err) {
-      showToast("Erreur de connexion lors de la sauvegarde", "error");
+    } catch {
+      showToast(t("library.saveConnectionError"), "error");
     } finally {
       setIsSavingDrawer(false);
     }
@@ -261,10 +293,10 @@ export default function LibraryPage() {
         showToast(data.message, "success");
       } else {
         const errData = await res.json();
-        showToast(errData.detail || "Erreur de normalisation", "error");
+        showToast(errData.detail || t("library.normalizeError"), "error");
       }
-    } catch (err) {
-      showToast("Erreur réseau lors de la normalisation", "error");
+    } catch {
+      showToast(t("library.normalizeNetworkError"), "error");
     }
   };
 
@@ -282,23 +314,22 @@ export default function LibraryPage() {
         method: "DELETE",
       });
       if (res.ok) {
-        showToast("Vidéo supprimée avec succès !");
+        showToast(t("library.deletedSuccess"));
         setVideos((prev) => prev.filter((v) => v.id !== videoToDelete.id));
         if (selectedVideo?.id === videoToDelete.id) {
           setSelectedVideo(null);
         }
       } else {
-        showToast("Impossible de supprimer la vidéo", "error");
+        showToast(t("library.deleteError"), "error");
       }
-    } catch (err) {
-      showToast("Erreur lors de la suppression", "error");
+    } catch {
+      showToast(t("library.deleteGenericError"), "error");
     } finally {
       setShowDeleteConfirm(false);
       setVideoToDelete(null);
     }
   };
 
-  // Drag-and-drop & file selection events
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -313,96 +344,44 @@ export default function LibraryPage() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      setupUpload(file);
-    }
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("video/"));
+    if (files.length > 0) addPendingSpecs(files);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setupUpload(e.target.files[0]);
-    }
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 0) addPendingSpecs(files);
+    // Réinitialiser l'input pour permettre de re-sélectionner les mêmes fichiers.
+    e.target.value = "";
   };
 
-  const setupUpload = (file: File) => {
-    setUploadFile(file);
-    // Strip extension for title
-    const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf(".")) || file.name;
-    setUploadTitle(nameWithoutExt);
-
-    // Try to guess program from file name
-    const lowerName = file.name.toLowerCase();
-    if (lowerName.includes("rpm")) {
-      setUploadProgramPreset("RPM");
-    } else if (lowerName.includes("sprint")) {
-      setUploadProgramPreset("Sprint");
-    } else if (lowerName.includes("trip")) {
-      setUploadProgramPreset("The Trip");
-    } else {
-      setUploadProgramPreset("RPM");
-    }
-
-    // Try to guess release number (like RPM 90 or SPRINT 24)
-    const match = file.name.match(/(?:rpm|sprint|trip|release|rel|r)\s*(\d+)/i);
-    if (match && match[1]) {
-      setUploadRelease(match[1]);
-    } else {
-      setUploadRelease("");
-    }
+  /** Crée les PendingSpec avec métadonnées pré-remplies par heuristique. */
+  const addPendingSpecs = (files: File[]) => {
+    const specs = files.map((file) => {
+      const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf(".")) || file.name;
+      const lowerName = file.name.toLowerCase();
+      let program = "RPM";
+      if (lowerName.includes("sprint")) program = "Sprint";
+      else if (lowerName.includes("trip")) program = "The Trip";
+      const match = file.name.match(/(?:rpm|sprint|trip|release|rel|r)\s*(\d+)/i);
+      const release = match?.[1] ?? "";
+      return { key: Math.random().toString(36).slice(2), kind: "video" as const, file, title: nameWithoutExt, program, release };
+    });
+    setPendingSpecs((prev) => [...prev, ...specs]);
   };
 
-  const executeUpload = () => {
-    if (!uploadFile) return;
-
-    const xhr = new XMLHttpRequest();
-    const formData = new FormData();
-    formData.append("file", uploadFile);
-    formData.append("title", uploadTitle);
-    
-    const finalProgram = uploadProgramPreset === "Autre" ? uploadCustomProgram : uploadProgramPreset;
-    if (finalProgram) formData.append("program", finalProgram);
-    if (uploadRelease) formData.append("release", uploadRelease);
-
-    xhr.upload.addEventListener("progress", (e) => {
-      if (e.lengthComputable) {
-        const percent = Math.round((e.loaded / e.total) * 100);
-        setUploadProgress(percent);
-      }
-    });
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        showToast("Vidéo importée avec succès !");
-        fetchVideos();
-        cancelUpload();
-      } else {
-        let errMsg = "Erreur lors de l'importation";
-        try {
-          const resJson = JSON.parse(xhr.responseText);
-          errMsg = resJson.detail || errMsg;
-        } catch (_) {}
-        showToast(errMsg, "error");
-        setUploadProgress(-1);
-      }
-    });
-
-    xhr.addEventListener("error", () => {
-      showToast("Erreur réseau pendant l'upload", "error");
-      setUploadProgress(-1);
-    });
-
-    xhr.open("POST", getApiUrl("/videos/upload"));
-    xhr.send(formData);
+  const updatePendingSpec = (key: string, patch: Partial<PendingUploadSpec>) => {
+    setPendingSpecs((prev) => prev.map((s) => s.key === key ? { ...s, ...patch } : s));
   };
 
-  const cancelUpload = () => {
-    setUploadFile(null);
-    setUploadTitle("");
-    setUploadRelease("");
-    setUploadCustomProgram("");
-    setUploadProgress(-1);
+  const removePendingSpec = (key: string) => {
+    setPendingSpecs((prev) => prev.filter((s) => s.key !== key));
+  };
+
+  const submitPendingUploads = () => {
+    if (pendingSpecs.length === 0) return;
+    addUploads(pendingSpecs.map(({ file, title, program, release }) => ({ kind: "video" as const, file, title, program, release })));
+    setPendingSpecs([]);
   };
 
   // Helper formats
@@ -443,16 +422,8 @@ export default function LibraryPage() {
       {/* Dynamic Toast Notifications */}
       {toast && (
         <div className={`toast ${toast.type}`}>
-          {toast.type === "success" && (
-            <svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          )}
-          {toast.type === "error" && (
-            <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          )}
+          {toast.type === "success" && <Icon name="check_circle" size={20} color="var(--accent-success)" filled />}
+          {toast.type === "error" && <Icon name="error" size={20} color="var(--accent-error)" filled />}
           <span>{toast.message}</span>
         </div>
       )}
@@ -465,7 +436,7 @@ export default function LibraryPage() {
         onDragLeave={handleDrag}
         onDrop={handleDrop}
         onClick={() => {
-          if (!uploadFile && fileInputRef.current) {
+          if (pendingSpecs.length === 0 && fileInputRef.current) {
             fileInputRef.current.click();
           }
         }}
@@ -474,119 +445,100 @@ export default function LibraryPage() {
           ref={fileInputRef}
           type="file"
           accept="video/*"
+          multiple
           style={{ display: "none" }}
           onChange={handleFileChange}
         />
-        
-        {!uploadFile ? (
+
+        {pendingSpecs.length === 0 ? (
           <>
-            <svg className="w-10 h-10 upload-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
+            <Icon name="cloud_upload" size={48} className="upload-icon" />
             <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: "8px 0 4px" }}>
-              Faites glisser une vidéo ici ou cliquez pour parcourir
+              {t("library.uploadDropHint")}
             </h3>
             <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: 0 }}>
-              Formats recommandés : MP4, MKV. Poids max : 10 Go.
+              {t("library.uploadFormatsHint")}
+            </p>
+            <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "4px" }}>
+              Plusieurs fichiers acceptés simultanément
             </p>
           </>
         ) : (
-          <div 
-            onClick={(e) => e.stopPropagation()} 
-            style={{ width: "100%", maxWidth: "500px", textAlign: "left" }}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: "560px", textAlign: "left" }}
           >
-            <h3 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: "16px", color: "var(--accent-primary)", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
-              🚀 Préparation de l'importation
+            <h3 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: "12px", color: "var(--accent-primary)", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+              {pendingSpecs.length} fichier{pendingSpecs.length > 1 ? "s" : ""} sélectionné{pendingSpecs.length > 1 ? "s" : ""} — vérifiez les métadonnées
             </h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <div className="form-group">
-                <label className="form-label">Nom du cours (Titre)</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={uploadTitle}
-                  onChange={(e) => setUploadTitle(e.target.value)}
-                  disabled={uploadProgress >= 0}
-                />
-              </div>
-
-              <div style={{ display: "flex", gap: "12px" }}>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Programme</label>
-                  <select
-                    className="form-control"
-                    value={uploadProgramPreset}
-                    onChange={(e) => setUploadProgramPreset(e.target.value)}
-                    disabled={uploadProgress >= 0}
-                  >
-                    <option value="RPM">RPM</option>
-                    <option value="Sprint">Sprint</option>
-                    <option value="The Trip">The Trip</option>
-                    <option value="Autre">Autre (Saisir ci-dessous)</option>
-                  </select>
-                </div>
-
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Release / Édition</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "320px", overflowY: "auto", paddingRight: "4px" }}>
+              {pendingSpecs.map((spec) => (
+                <div key={spec.key} style={{ background: "var(--bg-surface-hover)", borderRadius: "8px", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={spec.file!.name}>
+                      {spec.file!.name} ({(spec.file!.size / (1024 * 1024)).toFixed(1)} Mo)
+                    </span>
+                    <button onClick={() => removePendingSpec(spec.key)} className="olc-press" style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, display: "flex" }}>
+                      <Icon name="close" size={16} />
+                    </button>
+                  </div>
                   <input
                     type="text"
-                    placeholder="Ex: 92"
                     className="form-control"
-                    value={uploadRelease}
-                    onChange={(e) => setUploadRelease(e.target.value)}
-                    disabled={uploadProgress >= 0}
+                    placeholder="Titre"
+                    value={spec.title}
+                    onChange={(e) => updatePendingSpec(spec.key, { title: e.target.value })}
+                    style={{ padding: "6px 10px", fontSize: "0.85rem" }}
                   />
-                </div>
-              </div>
-
-              {uploadProgramPreset === "Autre" && (
-                <div className="form-group">
-                  <label className="form-label">Nom du programme personnalisé</label>
-                  <input
-                    type="text"
-                    placeholder="Ex: Bodypump"
-                    className="form-control"
-                    value={uploadCustomProgram}
-                    onChange={(e) => setUploadCustomProgram(e.target.value)}
-                    disabled={uploadProgress >= 0}
-                  />
-                </div>
-              )}
-
-              <div style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "4px" }}>
-                Fichier : <span style={{ color: "var(--text-main)", fontWeight: 600 }}>{uploadFile.name}</span> ({(uploadFile.size / (1024 * 1024)).toFixed(1)} Mo)
-              </div>
-
-              {uploadProgress >= 0 ? (
-                <div className="upload-progress-container">
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", fontWeight: 700 }}>
-                    <span>Téléversement...</span>
-                    <span>{uploadProgress}%</span>
-                  </div>
-                  <div className="progress-bar-bg">
-                    <div className="progress-bar-fill" style={{ width: `${uploadProgress}%` }} />
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <select
+                      className="form-control"
+                      value={spec.program ?? "RPM"}
+                      onChange={(e) => updatePendingSpec(spec.key, { program: e.target.value })}
+                      style={{ flex: 1, padding: "6px 8px", fontSize: "0.85rem" }}
+                    >
+                      <option value="RPM">RPM</option>
+                      <option value="Sprint">Sprint</option>
+                      <option value="The Trip">The Trip</option>
+                      <option value="Autre">{t("library.otherProgramOption")}</option>
+                    </select>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={t("library.releasePlaceholderExample")}
+                      value={spec.release ?? ""}
+                      onChange={(e) => updatePendingSpec(spec.key, { release: e.target.value })}
+                      style={{ width: "80px", padding: "6px 8px", fontSize: "0.85rem" }}
+                    />
                   </div>
                 </div>
-              ) : (
-                <div style={{ display: "flex", gap: "12px", marginTop: "12px" }}>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={executeUpload}
-                    style={{ flex: 1, height: "48px" }}
-                  >
-                    Lancer l'importation
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={cancelUpload}
-                    style={{ height: "48px" }}
-                  >
-                    Annuler
-                  </button>
-                </div>
-              )}
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: "12px", marginTop: "14px" }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={submitPendingUploads}
+                style={{ flex: 1, height: "44px" }}
+              >
+                Lancer {pendingSpecs.length} upload{pendingSpecs.length > 1 ? "s" : ""}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setPendingSpecs([])}
+                style={{ height: "44px" }}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => fileInputRef.current?.click()}
+                style={{ height: "44px", whiteSpace: "nowrap" }}
+              >
+                + Ajouter
+              </button>
             </div>
           </div>
         )}
@@ -596,18 +548,18 @@ export default function LibraryPage() {
       {selectedIds.size > 0 && (
         <div className="interrupted-block">
           <div className="interrupted-text">
-            <span className="interrupted-label">Sélection</span>
-            <span className="interrupted-title">{selectedIds.size} vidéo(s) sélectionnée(s)</span>
+            <span className="interrupted-label">{t("library.selectionLabel")}</span>
+            <span className="interrupted-title">{t("library.selectedCount", { count: selectedIds.size })}</span>
           </div>
           <div className="interrupted-actions">
             <button className="btn btn-secondary" onClick={() => setShowAddToPlaylist(true)}>
-              Ajouter à une playlist
+              {t("library.addToPlaylist")}
             </button>
             <button className="btn btn-danger" onClick={() => setBulkDeleteConfirm(true)}>
-              Supprimer
+              {t("common.delete")}
             </button>
             <button className="btn btn-secondary" onClick={clearSelection}>
-              Annuler la sélection
+              {t("library.clearSelection")}
             </button>
           </div>
         </div>
@@ -619,7 +571,7 @@ export default function LibraryPage() {
           <input
             type="text"
             className="search-input"
-            placeholder="Rechercher une vidéo..."
+            placeholder={t("library.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -629,18 +581,18 @@ export default function LibraryPage() {
             value={programFilter}
             onChange={(e) => setProgramFilter(e.target.value)}
           >
-            <option value="">Tous les programmes</option>
+            <option value="">{t("library.allPrograms")}</option>
             <option value="RPM">RPM</option>
             <option value="Sprint">Sprint</option>
             <option value="The Trip">The Trip</option>
-            <option value="Autre">Autre</option>
+            <option value="Autre">{t("library.otherProgram")}</option>
           </select>
 
           <input
             type="text"
             className="search-input"
             style={{ width: "120px" }}
-            placeholder="Release..."
+            placeholder={t("library.releasePlaceholder")}
             value={releaseFilter}
             onChange={(e) => setReleaseFilter(e.target.value)}
           />
@@ -650,31 +602,27 @@ export default function LibraryPage() {
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
           >
-            <option value="imported_at">Trier par date d'import</option>
-            <option value="title">Trier par titre</option>
-            <option value="duration">Trier par durée</option>
+            <option value="imported_at">{t("library.sortImportDate")}</option>
+            <option value="title">{t("library.sortTitle")}</option>
+            <option value="duration">{t("library.sortDuration")}</option>
           </select>
         </div>
 
         {/* Grid / List view toggle */}
         <div className="view-toggle">
           <button
-            className={`view-btn ${viewMode === "grid" ? "active" : ""}`}
+            className={`view-btn olc-press ${viewMode === "grid" ? "active" : ""}`}
             onClick={() => setViewMode("grid")}
-            title="Vue Grille"
+            title={t("library.gridView")}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z" />
-            </svg>
+            <Icon name="grid_view" size={18} />
           </button>
           <button
-            className={`view-btn ${viewMode === "list" ? "active" : ""}`}
+            className={`view-btn olc-press ${viewMode === "list" ? "active" : ""}`}
             onClick={() => setViewMode("list")}
-            title="Vue Liste"
+            title={t("library.listView")}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+            <Icon name="view_list" size={18} />
           </button>
         </div>
       </div>
@@ -682,15 +630,13 @@ export default function LibraryPage() {
       {/* Main library listing */}
       {loading ? (
         <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", minHeight: "300px", color: "var(--text-muted)" }}>
-          Chargement de la bibliothèque...
+          {t("library.loadingLibrary")}
         </div>
       ) : videos.length === 0 ? (
         <div style={{ display: "flex", flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "300px", color: "var(--text-muted)" }}>
-          <svg className="w-12 h-12" style={{ marginBottom: "12px", color: "rgba(255,255,255,0.1)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
-          </svg>
-          <p style={{ margin: 0, fontWeight: 600 }}>Aucune vidéo trouvée</p>
-          <p style={{ fontSize: "0.85rem", margin: "4px 0 0" }}>Essayez d'importer une nouvelle vidéo ou d'ajuster les filtres</p>
+          <Icon name="video_library" size={48} color="var(--border-focus)" style={{ marginBottom: "12px" }} />
+          <p style={{ margin: 0, fontWeight: 600 }}>{t("library.noVideosFound")}</p>
+          <p style={{ fontSize: "0.85rem", margin: "4px 0 0" }}>{t("library.noVideosHint")}</p>
         </div>
       ) : viewMode === "grid" ? (
         /* GRID VIEW — groupée par programme (réf. UX3.6) */
@@ -705,21 +651,17 @@ export default function LibraryPage() {
             .filter((g) => g.items.length > 0)
             .map((group) => (
               <div key={group.program}>
+                {/* Couleur du thème plutôt que du programme (réf. correctif
+                    "couleurs hardcodées associées à un cours"). */}
                 <h3
                   style={{
                     fontSize: "0.85rem",
                     marginBottom: "16px",
-                    color:
-                      group.program === "RPM"
-                        ? "var(--accent-rpm)"
-                        : group.program === "Sprint"
-                        ? "var(--accent-sprint)"
-                        : group.program === "The Trip"
-                        ? "var(--accent-trip)"
-                        : "var(--text-muted)",
+                    color: "var(--accent-primary)",
                   }}
                 >
-                  {group.program} <span style={{ color: "var(--text-dim)" }}>({group.items.length})</span>
+                  {group.program === "Autre" ? t("library.otherProgram") : group.program}{" "}
+                  <span style={{ color: "var(--text-dim)" }}>({group.items.length})</span>
                 </h3>
                 <div className="videos-grid">
                   {group.items.map((video) => {
@@ -742,10 +684,8 @@ export default function LibraryPage() {
                           {thumbSrc ? (
                             <img src={thumbSrc} alt={video.title} className="card-thumbnail" />
                           ) : (
-                            <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", background: "#0c0c0e", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              <svg className="w-8 h-8 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ opacity: 0.2 }}>
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                              </svg>
+                            <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", background: "var(--bg-surface-elevated)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <Icon name="movie" size={32} style={{ opacity: 0.2 }} />
                             </div>
                           )}
                           <span className="card-duration">{formatDuration(video.duration_seconds)}</span>
@@ -756,10 +696,10 @@ export default function LibraryPage() {
                           </h4>
                           <div className="card-meta-row">
                             <span className={`program-badge ${getProgramBadgeClass(video.program)}`}>
-                              {video.program || "Autre"}
+                              {video.program || t("library.otherProgram")}
                             </span>
                             {video.release && (
-                              <span className="release-badge">Rel. {video.release}</span>
+                              <span className="release-badge">{t("library.releaseBadge", { release: video.release })}</span>
                             )}
                           </div>
                         </div>
@@ -777,12 +717,12 @@ export default function LibraryPage() {
             <thead>
               <tr>
                 <th style={{ width: "36px" }}></th>
-                <th style={{ width: "80px" }}>Miniature</th>
-                <th>Titre</th>
-                <th>Programme</th>
-                <th>Release</th>
-                <th>Durée</th>
-                <th>Format</th>
+                <th style={{ width: "80px" }}>{t("library.thumbnailHeader")}</th>
+                <th>{t("library.titleHeader")}</th>
+                <th>{t("library.programHeader")}</th>
+                <th>{t("library.releaseHeader")}</th>
+                <th>{t("library.durationHeader")}</th>
+                <th>{t("library.formatHeader")}</th>
               </tr>
             </thead>
             <tbody>
@@ -802,10 +742,8 @@ export default function LibraryPage() {
                       {thumbSrc ? (
                         <img src={thumbSrc} alt="" className="table-thumb" />
                       ) : (
-                        <div className="table-thumb" style={{ background: "#0c0c0e", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ opacity: 0.2 }}>
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                          </svg>
+                        <div className="table-thumb" style={{ background: "var(--bg-surface-elevated)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <Icon name="movie" size={16} style={{ opacity: 0.2 }} />
                         </div>
                       )}
                     </td>
@@ -814,10 +752,10 @@ export default function LibraryPage() {
                     </td>
                     <td>
                       <span className={`program-badge ${getProgramBadgeClass(video.program)}`}>
-                        {video.program || "Autre"}
+                        {video.program || t("library.otherProgram")}
                       </span>
                     </td>
-                    <td>{video.release ? `Release ${video.release}` : "-"}</td>
+                    <td>{video.release ? t("library.releaseFull", { release: video.release }) : "-"}</td>
                     <td>{formatDuration(video.duration_seconds)}</td>
                     <td style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
                       {video.width && video.height ? `${video.width}x${video.height}` : ""} {video.codec ? `(${video.codec})` : ""}
@@ -840,9 +778,7 @@ export default function LibraryPage() {
                 {selectedVideo.title}
               </h3>
               <button className="close-btn" onClick={handleCloseDrawer}>
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon name="close" size={20} />
               </button>
             </div>
 
@@ -861,11 +797,11 @@ export default function LibraryPage() {
               {/* Form edit metadata */}
               <form className="drawer-form" onSubmit={handleSaveMetadata}>
                 <h4 style={{ fontSize: "0.85rem", fontWeight: 800, borderBottom: "1px solid var(--border-color)", paddingBottom: "6px", margin: "0 0 8px" }}>
-                  MÉTADONNÉES DU COURS
+                  {t("library.metadataSectionTitle")}
                 </h4>
 
                 <div className="form-group">
-                  <label className="form-label">Titre du cours</label>
+                  <label className="form-label">{t("library.courseTitleFieldLabel")}</label>
                   <input
                     type="text"
                     className="form-control"
@@ -877,38 +813,38 @@ export default function LibraryPage() {
 
                 <div style={{ display: "flex", gap: "12px" }}>
                   <div className="form-group" style={{ flex: 1 }}>
-                    <label className="form-label">Programme</label>
+                    <label className="form-label">{t("library.programLabel")}</label>
                     <select
                       className="form-control"
                       value={drawerProgramPreset}
                       onChange={(e) => setDrawerProgramPreset(e.target.value)}
                     >
-                      <option value="">Aucun</option>
+                      <option value="">{t("library.noneOption")}</option>
                       <option value="RPM">RPM</option>
                       <option value="Sprint">Sprint</option>
                       <option value="The Trip">The Trip</option>
-                      <option value="Autre">Autre (Saisir ci-dessous)</option>
+                      <option value="Autre">{t("library.otherProgramOption")}</option>
                     </select>
                   </div>
 
                   <div className="form-group" style={{ flex: 1 }}>
-                    <label className="form-label">Release / Édition</label>
+                    <label className="form-label">{t("library.releaseLabel")}</label>
                     <input
                       type="text"
                       className="form-control"
                       value={drawerRelease}
                       onChange={(e) => setDrawerRelease(e.target.value)}
-                      placeholder="Ex: 92"
+                      placeholder={t("library.releasePlaceholderExample")}
                     />
                   </div>
                 </div>
 
                 {drawerProgramPreset === "Autre" && (
                   <div className="form-group">
-                    <label className="form-label">Nom du programme personnalisé</label>
+                    <label className="form-label">{t("library.customProgramLabel")}</label>
                     <input
                       type="text"
-                      placeholder="Ex: Bodypump"
+                      placeholder={t("library.customProgramPlaceholder")}
                       className="form-control"
                       value={drawerCustomProgram}
                       onChange={(e) => setDrawerCustomProgram(e.target.value)}
@@ -918,26 +854,26 @@ export default function LibraryPage() {
                 )}
 
                 {/* Readonly info */}
-                <div style={{ background: "rgba(255,255,255,0.02)", padding: "12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", display: "flex", flexDirection: "column", gap: "8px", fontSize: "0.85rem", marginTop: "8px" }}>
+                <div style={{ background: "var(--bg-surface-hover)", padding: "12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", display: "flex", flexDirection: "column", gap: "8px", fontSize: "0.85rem", marginTop: "8px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--text-muted)" }}>Résolution :</span>
+                    <span style={{ color: "var(--text-muted)" }}>{t("library.resolutionLabel")}</span>
                     <span style={{ color: "var(--text-main)", fontWeight: 600 }}>
-                      {selectedVideo.width && selectedVideo.height ? `${selectedVideo.width}x${selectedVideo.height}` : "Inconnue"}
+                      {selectedVideo.width && selectedVideo.height ? `${selectedVideo.width}x${selectedVideo.height}` : t("library.unknownValue")}
                     </span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--text-muted)" }}>Codec Vidéo :</span>
-                    <span style={{ color: "var(--text-main)", fontWeight: 600 }}>{selectedVideo.codec || "Inconnu"}</span>
+                    <span style={{ color: "var(--text-muted)" }}>{t("library.videoCodecLabel")}</span>
+                    <span style={{ color: "var(--text-main)", fontWeight: 600 }}>{selectedVideo.codec || t("library.unknownCodec")}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--text-muted)" }}>Source d'import :</span>
+                    <span style={{ color: "var(--text-muted)" }}>{t("library.importSourceLabel")}</span>
                     <span style={{ color: "var(--text-main)", fontWeight: 600, textTransform: "capitalize" }}>
-                      {selectedVideo.source === "upload" ? "Téléchargement" : "Dossier surveillé"}
+                      {selectedVideo.source === "upload" ? t("library.uploadSource") : t("library.watchedFolderSource")}
                     </span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--text-muted)" }}>Chemin disque :</span>
-                    <span 
+                    <span style={{ color: "var(--text-muted)" }}>{t("library.diskPathLabel")}</span>
+                    <span
                       style={{ color: "var(--text-muted)", fontSize: "0.75rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "240px" }}
                       title={selectedVideo.file_path}
                     >
@@ -953,17 +889,17 @@ export default function LibraryPage() {
                     style={{ flex: 1, height: "48px" }}
                     disabled={isSavingDrawer}
                   >
-                    {isSavingDrawer ? "Enregistrement..." : "Enregistrer"}
+                    {isSavingDrawer ? t("common.saving") : t("common.save")}
                   </button>
-                  
+
                   <button
                     type="button"
                     className="btn btn-secondary"
                     onClick={handleNormalize}
                     style={{ height: "48px" }}
-                    title="Optimise la vidéo (AAC/MP4) pour la lecture fluide dans le navigateur si nécessaire"
+                    title={t("library.normalizeTitle")}
                   >
-                    Normaliser
+                    {t("library.normalize")}
                   </button>
 
                   <button
@@ -972,7 +908,7 @@ export default function LibraryPage() {
                     onClick={() => triggerDelete(selectedVideo)}
                     style={{ height: "48px" }}
                   >
-                    Supprimer
+                    {t("common.delete")}
                   </button>
                 </div>
               </form>
@@ -986,12 +922,12 @@ export default function LibraryPage() {
         <div className="modal-overlay">
           <div className="modal-content">
             <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
-              Supprimer la vidéo ?
+              {t("library.deleteVideoTitle")}
             </h3>
             <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
-              Êtes-vous sûr de vouloir supprimer définitivement la vidéo{" "}
-              <strong style={{ color: "var(--text-main)" }}>{videoToDelete.title}</strong> ?
-              Cette action est irréversible et supprimera le fichier du disque.
+              {t("library.deleteVideoConfirmBefore")}{" "}
+              <strong style={{ color: "var(--text-main)" }}>{videoToDelete.title}</strong>
+              {t("library.deleteVideoConfirmAfter")}
             </p>
             <div className="modal-actions">
               <button
@@ -1002,7 +938,7 @@ export default function LibraryPage() {
                   setVideoToDelete(null);
                 }}
               >
-                Annuler
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -1010,7 +946,7 @@ export default function LibraryPage() {
                 style={{ backgroundColor: "var(--accent-error)" }}
                 onClick={confirmDelete}
               >
-                Confirmer la suppression
+                {t("library.confirmDelete")}
               </button>
             </div>
           </div>
@@ -1022,17 +958,17 @@ export default function LibraryPage() {
         <div className="modal-overlay">
           <div className="modal-content">
             <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
-              Supprimer {selectedIds.size} vidéo(s) ?
+              {t("library.deleteBulkTitle", { count: selectedIds.size })}
             </h3>
             <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
-              Cette action est irréversible et supprimera les fichiers du disque.
+              {t("library.deleteBulkConfirm")}
             </p>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setBulkDeleteConfirm(false)}>
-                Annuler
+                {t("common.cancel")}
               </button>
               <button type="button" className="btn btn-primary" style={{ backgroundColor: "var(--accent-error)" }} onClick={confirmBulkDelete}>
-                Confirmer la suppression
+                {t("library.confirmDelete")}
               </button>
             </div>
           </div>
@@ -1044,17 +980,17 @@ export default function LibraryPage() {
         <div className="modal-overlay">
           <div className="modal-content">
             <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
-              Ajouter {selectedIds.size} vidéo(s) à une playlist
+              {t("library.addToPlaylistTitle", { count: selectedIds.size })}
             </h3>
             <select className="form-control" value={bulkTargetPlaylistId} onChange={(e) => setBulkTargetPlaylistId(e.target.value)}>
-              <option value="">Choisir une playlist...</option>
+              <option value="">{t("library.choosePlaylist")}</option>
               {playlists.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
             {playlists.length === 0 && (
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: 0 }}>
-                Aucune playlist existante. Créez-en une depuis la page Playlists.
+                {t("library.noPlaylistsHint")}
               </p>
             )}
             <div className="modal-actions">
@@ -1066,10 +1002,10 @@ export default function LibraryPage() {
                   setBulkTargetPlaylistId("");
                 }}
               >
-                Annuler
+                {t("common.cancel")}
               </button>
               <button type="button" className="btn btn-primary" onClick={confirmBulkAddToPlaylist} disabled={!bulkTargetPlaylistId}>
-                Ajouter
+                {t("library.add")}
               </button>
             </div>
           </div>
