@@ -1,7 +1,11 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import { usePlaybackSocket } from "@/lib/usePlaybackSocket";
+import { useAppSettings } from "@/lib/AppSettingsContext";
+import { useIsMobile } from "@/lib/useIsMobile";
+import Icon from "@/components/Icon";
 
 interface Video {
   id: number;
@@ -45,6 +49,14 @@ interface ToastState {
 }
 
 export default function PlaylistsPage() {
+  const { t } = useAppSettings();
+  // Réf. correctif "le bouton créer une playlist n'affiche rien sur
+  // téléphone" : .playlists-left-panel/.playlists-right-panel imposent
+  // ensemble plus de 800px de largeur minimale côte à côte — sur un
+  // téléphone, le panneau droit (l'éditeur, donc le formulaire de création)
+  // sortait simplement de l'écran. /audio-playlists avait déjà ce
+  // traitement mobile ; il manquait ici.
+  const isMobile = useIsMobile();
   const { connected, sendCommand } = usePlaybackSocket();
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
   const [videos, setVideos] = useState<Video[]>([]);
@@ -78,7 +90,7 @@ export default function PlaylistsPage() {
   const getApiUrl = (path: string) => {
     if (typeof window !== "undefined") {
       if (window.location.port === "3000") {
-        return `http://localhost:8000/api${path}`;
+        return `http://localhost:8001/api${path}`;
       }
     }
     return `/api${path}`;
@@ -106,10 +118,10 @@ export default function PlaylistsPage() {
         const data = await res.json();
         setPlaylists(data);
       } else {
-        showToast("Erreur de chargement des playlists", "error");
+        showToast(t("playlists.fetchError"), "error");
       }
     } catch {
-      showToast("Erreur réseau (playlists)", "error");
+      showToast(t("playlists.fetchNetworkError"), "error");
     }
   };
 
@@ -122,13 +134,13 @@ export default function PlaylistsPage() {
         setVideos(data);
       }
     } catch {
-      showToast("Erreur réseau (vidéos)", "error");
+      showToast(t("playlists.videosNetworkError"), "error");
     }
   };
 
   // Initial load
   useEffect(() => {
-    setLoading(true);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     Promise.all([fetchPlaylists(), fetchVideos()]).finally(() => setLoading(false));
   }, []);
 
@@ -159,11 +171,11 @@ export default function PlaylistsPage() {
   const handleLaunch = (e: React.MouseEvent, id: number) => {
     e.stopPropagation(); // Avoid triggering edit selection
     if (!connected) {
-      showToast("L'écran cinéma est déconnecté", "error");
+      showToast(t("playlists.screenDisconnected"), "error");
       return;
     }
     sendCommand("load_playlist", { playlist_id: id });
-    showToast("Playlist envoyée sur l'écran cinéma !");
+    showToast(t("playlists.launchedToast"));
   };
 
   // Delete Playlist
@@ -180,17 +192,17 @@ export default function PlaylistsPage() {
         method: "DELETE",
       });
       if (res.ok) {
-        showToast("Playlist supprimée !");
+        showToast(t("playlists.deletedToast"));
         setPlaylists((prev) => prev.filter((p) => p.id !== playlistToDelete.id));
         // Reset editor if deleted active editing playlist
         if (selectedPlaylistId === playlistToDelete.id) {
           handleCancelEdit();
         }
       } else {
-        showToast("Impossible de supprimer la playlist", "error");
+        showToast(t("playlists.deleteError"), "error");
       }
     } catch {
-      showToast("Erreur réseau lors de la suppression", "error");
+      showToast(t("playlists.deleteNetworkError"), "error");
     } finally {
       setShowDeleteConfirm(false);
       setPlaylistToDelete(null);
@@ -205,13 +217,13 @@ export default function PlaylistsPage() {
         method: "POST",
       });
       if (res.ok) {
-        showToast("Playlist dupliquée avec succès !");
+        showToast(t("playlists.duplicatedToast"));
         fetchPlaylists();
       } else {
-        showToast("Impossible de dupliquer la playlist", "error");
+        showToast(t("playlists.duplicateError"), "error");
       }
     } catch {
-      showToast("Erreur de connexion", "error");
+      showToast(t("playlists.connectionError"), "error");
     }
   };
 
@@ -243,10 +255,10 @@ export default function PlaylistsPage() {
         const items = detail.items.map((item) => item.video);
         setPlaylistItems(items);
       } else {
-        showToast("Erreur lors de la récupération des détails de la playlist", "error");
+        showToast(t("playlists.detailFetchError"), "error");
       }
     } catch {
-      showToast("Erreur réseau", "error");
+      showToast(t("playlists.networkError"), "error");
     }
   };
 
@@ -260,7 +272,7 @@ export default function PlaylistsPage() {
   // Sequencer Operations
   const handleAddVideo = (video: Video) => {
     setPlaylistItems((prev) => [...prev, video]);
-    showToast(`"${video.title}" ajouté à la playlist`);
+    showToast(t("playlists.addedToast", { title: video.title }));
   };
 
   const handleRemoveVideo = (index: number) => {
@@ -292,7 +304,7 @@ export default function PlaylistsPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!playlistName.trim()) {
-      showToast("Le nom de la playlist ne peut pas être vide", "warning");
+      showToast(t("playlists.emptyNameWarning"), "warning");
       return;
     }
 
@@ -322,8 +334,8 @@ export default function PlaylistsPage() {
       if (res.ok) {
         showToast(
           selectedPlaylistId
-            ? "Playlist mise à jour avec succès !"
-            : "Playlist créée avec succès !"
+            ? t("playlists.updatedToast")
+            : t("playlists.createdToast")
         );
         fetchPlaylists();
         // If creating, select the new one or just reset selection
@@ -353,10 +365,10 @@ export default function PlaylistsPage() {
         }
       } else {
         const data = await res.json();
-        showToast(data.detail || "Erreur de sauvegarde", "error");
+        showToast(data.detail || t("playlists.saveError"), "error");
       }
     } catch {
-      showToast("Erreur de connexion lors de la sauvegarde", "error");
+      showToast(t("playlists.saveConnectionError"), "error");
     } finally {
       setIsSaving(false);
     }
@@ -449,64 +461,68 @@ export default function PlaylistsPage() {
   );
 
   return (
-    <div style={{ padding: "24px", height: "100%", overflow: "hidden" }}>
+    <div style={{ padding: "24px", height: isMobile ? "auto" : "100%", overflow: isMobile ? "visible" : "hidden" }}>
       {/* Toast Notifications */}
       {toast && (
         <div className={`toast ${toast.type}`}>
-          {toast.type === "success" && (
-            <svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          )}
-          {toast.type === "error" && (
-            <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          )}
-          {toast.type === "warning" && (
-            <svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          )}
+          {toast.type === "success" && <Icon name="check_circle" size={20} color="var(--accent-success)" filled />}
+          {toast.type === "error" && <Icon name="error" size={20} color="var(--accent-error)" filled />}
+          {toast.type === "warning" && <Icon name="warning" size={20} color="var(--accent-warning)" filled />}
           <span>{toast.message}</span>
         </div>
       )}
 
-      <div className="playlists-split-container">
+      <div
+        className="playlists-split-container"
+        style={isMobile ? { flexDirection: "column", height: "auto", overflow: "visible" } : undefined}
+      >
         {/* Left Panel: Search & Playlists list */}
-        <div className="playlists-left-panel">
+        <div
+          className="playlists-left-panel"
+          style={isMobile ? { maxWidth: "100%", minWidth: 0, height: "auto" } : undefined}
+        >
+          {/* Bascule vidéo/audio (réf. retour utilisateur "il manque l'onglet
+              pour faire des playlists de musiques") : les deux types de
+              playlists vivaient sur deux pages distinctes du tiroir mobile,
+              sans lien visible entre elles depuis l'une ou l'autre. */}
+          <div className="playlists-type-tabs">
+            <span className="speed-btn active">
+              <Icon name="video_library" size={16} /> {t("nav.playlists")}
+            </span>
+            <Link href="/audio-playlists/" className="speed-btn">
+              <Icon name="queue_music" size={16} /> {t("nav.audioPlaylists")}
+            </Link>
+          </div>
           <h3 style={{ fontSize: "1.1rem", margin: "0 0 4px", color: "var(--text-main)", fontWeight: 800 }}>
-            Playlists
+            {t("playlists.title")}
           </h3>
           <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", margin: "0 0 16px" }}>
-            Gérez vos enchaînements automatiques.
+            {t("playlists.subtitle")}
           </p>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "16px" }}>
             <input
               type="text"
               className="form-control"
-              placeholder="Rechercher une playlist..."
+              placeholder={t("playlists.searchPlaceholder")}
               value={playlistSearch}
               onChange={(e) => setPlaylistSearch(e.target.value)}
               style={{ height: "38px", fontSize: "0.85rem" }}
             />
             <button className="btn btn-primary" onClick={handleCreateOpen} style={{ width: "100%", height: "38px" }}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ marginRight: "6px" }}>
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-              </svg>
-              Créer une Playlist
+              <Icon name="add" size={18} />
+              {t("playlists.createPlaylist")}
             </button>
           </div>
 
-          <div className="playlists-scroll-area">
+          <div className="playlists-scroll-area" style={isMobile ? { maxHeight: "260px" } : undefined}>
             {loading ? (
               <div style={{ textAlign: "center", padding: "20px", color: "var(--text-muted)", fontSize: "0.9rem" }}>
-                Chargement...
+                {t("playlists.loading")}
               </div>
             ) : filteredPlaylists.length === 0 ? (
               <div style={{ textAlign: "center", padding: "30px 10px", color: "var(--text-muted)", fontSize: "0.85rem" }}>
-                Aucune playlist trouvée.
+                {t("playlists.noPlaylistsFound")}
               </div>
             ) : (
               filteredPlaylists.map((p) => {
@@ -522,7 +538,7 @@ export default function PlaylistsPage() {
                     </div>
                     <div className="playlist-card-meta">
                       <span className="release-badge" style={{ padding: "2px 6px" }}>
-                        {p.item_count} cours
+                        {t("playlists.coursesCount", { count: p.item_count })}
                       </span>
                       <span>{formatDuration(p.total_duration_seconds)}</span>
                     </div>
@@ -531,28 +547,28 @@ export default function PlaylistsPage() {
                         className="btn btn-primary"
                         style={{ height: "28px", padding: "0 10px", fontSize: "0.75rem" }}
                         onClick={(e) => handleLaunch(e, p.id)}
-                        title="Lancer"
+                        title={t("playlists.launch")}
                       >
-                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24" style={{ marginRight: "4px" }}>
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                        Lancer
+                        <Icon name="play_arrow" size={14} filled />
+                        {t("playlists.launch")}
                       </button>
                       <button
                         className="btn btn-secondary"
                         style={{ height: "28px", padding: "0 8px", fontSize: "0.75rem" }}
                         onClick={(e) => handleDuplicate(e, p.id)}
-                        title="Dupliquer"
+                        title={t("playlists.duplicate")}
                       >
-                        Dupliquer
+                        <Icon name="content_copy" size={14} />
+                        {t("playlists.duplicate")}
                       </button>
                       <button
                         className="btn btn-danger"
                         style={{ height: "28px", padding: "0 8px", fontSize: "0.75rem" }}
                         onClick={(e) => triggerDelete(e, p)}
-                        title="Supprimer"
+                        title={t("common.delete")}
                       >
-                        Supprimer
+                        <Icon name="delete" size={14} />
+                        {t("common.delete")}
                       </button>
                     </div>
                   </div>
@@ -563,22 +579,23 @@ export default function PlaylistsPage() {
         </div>
 
         {/* Right Panel: Editor or Placeholder */}
-        <div className="playlists-right-panel">
+        <div
+          className="playlists-right-panel"
+          style={isMobile ? { minWidth: 0, height: "auto", overflow: "visible" } : undefined}
+        >
           {selectedPlaylistId === null && !isCreating ? (
             <div className="editor-placeholder">
-              <svg className="w-12 h-12" style={{ color: "rgba(255,255,255,0.06)", marginBottom: "12px" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              <h4 style={{ margin: 0, fontWeight: 700, color: "var(--text-main)" }}>Éditeur de Playlist</h4>
+              <Icon name="edit_note" size={48} color="var(--border-focus)" style={{ marginBottom: "12px" }} />
+              <h4 style={{ margin: 0, fontWeight: 700, color: "var(--text-main)" }}>{t("playlists.editorTitle")}</h4>
               <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Sélectionnez une playlist à gauche ou cliquez sur &quot;Créer une Playlist&quot; pour commencer.
+                {t("playlists.editorPlaceholderHint")}
               </p>
             </div>
           ) : (
-            <form onSubmit={handleSave} className="playlist-editor-form">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <form onSubmit={handleSave} className="playlist-editor-form" style={isMobile ? { height: "auto" } : undefined}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
                 <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
-                  {isCreating ? "Nouvelle Playlist" : "Modifier la Playlist"}
+                  {isCreating ? t("playlists.newPlaylist") : t("playlists.editPlaylist")}
                 </h3>
                 <div style={{ display: "flex", gap: "8px" }}>
                   <button
@@ -587,7 +604,7 @@ export default function PlaylistsPage() {
                     style={{ height: "36px", padding: "0 16px", fontSize: "0.85rem" }}
                     disabled={isSaving}
                   >
-                    {isSaving ? "Enregistrement..." : "Sauvegarder"}
+                    {isSaving ? t("common.saving") : t("playlists.save")}
                   </button>
                   <button
                     type="button"
@@ -596,7 +613,7 @@ export default function PlaylistsPage() {
                     onClick={handleCancelEdit}
                     disabled={isSaving}
                   >
-                    Annuler
+                    {t("common.cancel")}
                   </button>
                 </div>
               </div>
@@ -604,12 +621,12 @@ export default function PlaylistsPage() {
               {/* Name Input */}
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label" style={{ fontSize: "0.75rem", marginBottom: "4px" }}>
-                  Nom de la playlist
+                  {t("playlists.nameLabel")}
                 </label>
                 <input
                   type="text"
                   className="form-control"
-                  placeholder="Ex: Enchaînement RPM & Sprint"
+                  placeholder={t("playlists.namePlaceholder")}
                   value={playlistName}
                   onChange={(e) => setPlaylistName(e.target.value)}
                   required
@@ -619,19 +636,19 @@ export default function PlaylistsPage() {
               </div>
 
               {/* Metadata Grid */}
-              <div className="editor-metadata-grid">
+              <div className="editor-metadata-grid" style={isMobile ? { gridTemplateColumns: "1fr 1fr" } : undefined}>
                 <div className="metadata-stat">
-                  <span className="metadata-stat-label">Nombre de cours</span>
+                  <span className="metadata-stat-label">{t("playlists.courseCountLabel")}</span>
                   <span className="metadata-stat-value">{playlistItems.length}</span>
                 </div>
                 <div className="metadata-stat">
-                  <span className="metadata-stat-label">Durée totale</span>
+                  <span className="metadata-stat-label">{t("playlists.totalDurationLabel")}</span>
                   <span className="metadata-stat-value">{formatDuration(totalDurationSeconds)}</span>
                 </div>
                 <div className="metadata-stat">
-                  <span className="metadata-stat-label">Statut</span>
+                  <span className="metadata-stat-label">{t("playlists.statusLabel")}</span>
                   <span className="metadata-stat-value" style={{ color: "var(--accent-primary)", fontSize: "0.95rem", textTransform: "uppercase" }}>
-                    En cours d&apos;édition
+                    {t("playlists.statusEditing")}
                   </span>
                 </div>
               </div>
@@ -639,11 +656,12 @@ export default function PlaylistsPage() {
               {/* Visual Sequencer (Drag & Drop Zone) */}
               <div style={{ display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: 0 }}>
                 <span className="form-label" style={{ fontSize: "0.75rem", margin: 0 }}>
-                  Séquenceur visuel (Glisser pour réordonner)
+                  {t("playlists.sequencerLabel")}
                 </span>
-                
+
                 <div
                   className={`drag-drop-zone ${dragOverIndex === -1 ? "drag-over" : ""}`}
+                  style={isMobile ? { minHeight: "80px", maxHeight: "320px" } : undefined}
                   onDragOver={(e) => {
                     e.preventDefault();
                     if (dragSource === "library") setDragOverIndex(-1);
@@ -653,11 +671,9 @@ export default function PlaylistsPage() {
                 >
                   {playlistItems.length === 0 ? (
                     <div className="empty-playlist-placeholder">
-                      <svg className="w-8 h-8" style={{ color: "rgba(255,255,255,0.04)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                      </svg>
-                      <span>Aucun cours sélectionné.</span>
-                      <span style={{ fontSize: "0.75rem", opacity: 0.7 }}>Glissez-déposez des cours depuis la bibliothèque ci-dessous ou cliquez sur + Ajouter.</span>
+                      <Icon name="playlist_add" size={32} color="var(--border-focus)" />
+                      <span>{t("playlists.emptySequencer")}</span>
+                      <span style={{ fontSize: "0.75rem", opacity: 0.7 }}>{t("playlists.emptySequencerHint")}</span>
                     </div>
                   ) : (
                     playlistItems.map((item, index) => {
@@ -667,14 +683,14 @@ export default function PlaylistsPage() {
                         <div
                           key={`${item.id}-${index}`}
                           className={`playlist-drag-item ${isDragged ? "dragging" : ""} ${isOver ? "drag-over-item" : ""}`}
-                          draggable
+                          draggable={!isMobile}
                           onDragStart={(e) => handleDragStart(e, index, "sequencer")}
                           onDragOver={(e) => handleDragOver(e, index)}
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => handleDrop(e, index)}
                           onDragEnd={resetDragState}
                         >
-                          <div className="drag-handle">⋮⋮</div>
+                          {!isMobile && <div className="drag-handle"><Icon name="drag_indicator" size={16} /></div>}
                           <span style={{ fontWeight: 800, color: "var(--text-muted)", fontSize: "0.85rem", width: "16px" }}>
                             {index + 1}
                           </span>
@@ -690,7 +706,7 @@ export default function PlaylistsPage() {
                               )}
                               {item.release && (
                                 <span className="release-badge" style={{ fontSize: "0.55rem", padding: "1px 4px" }}>
-                                  Rel. {item.release}
+                                  {t("playlists.releaseBadge", { release: item.release })}
                                 </span>
                               )}
                               <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
@@ -705,9 +721,9 @@ export default function PlaylistsPage() {
                               style={{ width: "24px", height: "24px", padding: 0, borderRadius: "50%", fontSize: "0.8rem" }}
                               onClick={() => handleMoveUp(index)}
                               disabled={index === 0}
-                              title="Monter"
+                              title={t("playlists.moveUp")}
                             >
-                              ↑
+                              <Icon name="arrow_upward" size={14} />
                             </button>
                             <button
                               type="button"
@@ -715,18 +731,18 @@ export default function PlaylistsPage() {
                               style={{ width: "24px", height: "24px", padding: 0, borderRadius: "50%", fontSize: "0.8rem" }}
                               onClick={() => handleMoveDown(index)}
                               disabled={index === playlistItems.length - 1}
-                              title="Descendre"
+                              title={t("playlists.moveDown")}
                             >
-                              ↓
+                              <Icon name="arrow_downward" size={14} />
                             </button>
                             <button
                               type="button"
                               className="btn btn-danger"
                               style={{ width: "24px", height: "24px", padding: 0, borderRadius: "50%", fontSize: "0.8rem" }}
                               onClick={() => handleRemoveVideo(index)}
-                              title="Retirer"
+                              title={t("playlists.remove")}
                             >
-                              ×
+                              <Icon name="close" size={14} />
                             </button>
                           </div>
                         </div>
@@ -737,19 +753,19 @@ export default function PlaylistsPage() {
               </div>
 
               {/* Library Picker at the Bottom */}
-              <div className="library-picker">
+              <div className="library-picker" style={isMobile ? { height: "auto", maxHeight: "360px" } : undefined}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span className="form-label" style={{ fontSize: "0.75rem", margin: 0, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: "0.05em" }}>
-                    Bibliothèque de cours (Glisser ou + Ajouter)
+                    {t("playlists.libraryPickerLabel")}
                   </span>
                 </div>
 
-                <div style={{ display: "flex", gap: "8px" }}>
+                <div style={{ display: "flex", gap: "8px", flexWrap: isMobile ? "wrap" : "nowrap" }}>
                   <input
                     type="text"
                     className="form-control"
-                    style={{ flex: 1, height: "32px", fontSize: "0.8rem", padding: "0 10px" }}
-                    placeholder="Rechercher par titre ou release..."
+                    style={{ flex: 1, height: "32px", fontSize: "0.8rem", padding: "0 10px", minWidth: isMobile ? "100%" : undefined }}
+                    placeholder={t("playlists.videoSearchPlaceholder")}
                     value={videoSearch}
                     onChange={(e) => setVideoSearch(e.target.value)}
                   />
@@ -759,29 +775,29 @@ export default function PlaylistsPage() {
                     value={videoProgramFilter}
                     onChange={(e) => setVideoProgramFilter(e.target.value)}
                   >
-                    <option value="">Tous</option>
+                    <option value="">{t("playlists.allProgramsShort")}</option>
                     <option value="RPM">RPM</option>
                     <option value="Sprint">Sprint</option>
                     <option value="The Trip">The Trip</option>
-                    <option value="Autre">Autre</option>
+                    <option value="Autre">{t("playlists.otherProgram")}</option>
                   </select>
                 </div>
 
                 <div className="library-picker-list">
                   {filteredVideos.length === 0 ? (
                     <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: "0.8rem", padding: "16px" }}>
-                      Aucun cours ne correspond à la recherche.
+                      {t("playlists.noMatchingVideos")}
                     </div>
                   ) : (
                     filteredVideos.map((video) => (
                       <div
                         key={video.id}
                         className="library-picker-item"
-                        draggable
+                        draggable={!isMobile}
                         onDragStart={(e) => handleDragStart(e, video.id, "library")}
                         onDragEnd={resetDragState}
                       >
-                        <div className="drag-handle" style={{ marginRight: "8px" }}>⋮⋮</div>
+                        {!isMobile && <div className="drag-handle" style={{ marginRight: "8px" }}><Icon name="drag_indicator" size={16} /></div>}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <span style={{ fontWeight: 700, fontSize: "0.8rem", color: "var(--text-main)" }}>
                             {video.title}
@@ -794,7 +810,7 @@ export default function PlaylistsPage() {
                             )}
                             {video.release && (
                               <span className="release-badge" style={{ fontSize: "0.55rem", padding: "0px 3px" }}>
-                                Rel. {video.release}
+                                {t("playlists.releaseBadge", { release: video.release })}
                               </span>
                             )}
                             <span style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>
@@ -808,7 +824,7 @@ export default function PlaylistsPage() {
                           style={{ height: "26px", padding: "0 8px", fontSize: "0.7rem", fontWeight: 700 }}
                           onClick={() => handleAddVideo(video)}
                         >
-                          + Ajouter
+                          {t("playlists.addShort")}
                         </button>
                       </div>
                     ))
@@ -824,19 +840,19 @@ export default function PlaylistsPage() {
       {showDeleteConfirm && playlistToDelete && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3 style={{ fontSize: "1.1rem", margin: "0 0 12px" }}>Supprimer la Playlist ?</h3>
+            <h3 style={{ fontSize: "1.1rem", margin: "0 0 12px" }}>{t("playlists.deletePlaylistTitle")}</h3>
             <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: "0 0 20px", lineHeight: 1.5 }}>
-              Êtes-vous sûr de vouloir supprimer la playlist <strong style={{ color: "var(--text-main)" }}>{playlistToDelete.name}</strong> ? Cette action est irréversible.
+              {t("playlists.deletePlaylistConfirmBefore")} <strong style={{ color: "var(--text-main)" }}>{playlistToDelete.name}</strong>{t("playlists.deletePlaylistConfirmAfter")}
             </p>
             <div className="modal-actions">
               <button className="btn btn-danger" onClick={confirmDelete}>
-                Supprimer
+                {t("common.delete")}
               </button>
               <button className="btn btn-secondary" onClick={() => {
                 setShowDeleteConfirm(false);
                 setPlaylistToDelete(null);
               }}>
-                Annuler
+                {t("common.cancel")}
               </button>
             </div>
           </div>

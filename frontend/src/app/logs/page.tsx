@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useAppSettings } from "@/lib/AppSettingsContext";
+import type { Language } from "@/lib/i18n";
 
 interface ActivityLogEntry {
   id: number;
@@ -11,35 +13,35 @@ interface ActivityLogEntry {
 
 function getApiUrl(path: string) {
   if (typeof window !== "undefined" && window.location.port === "3000") {
-    return `http://localhost:8000/api${path}`;
+    return `http://localhost:8001/api${path}`;
   }
   return `/api${path}`;
 }
 
-const EVENT_LABELS: Record<string, string> = {
-  video_imported: "Vidéo importée",
-  background_imported: "Fond animé importé",
-  audio_course_imported: "Cours audio importé",
-  video_started: "Lecture démarrée",
-  background_started: "Fond animé lancé",
-  audio_course_started: "Mode coach démarré",
-  playlist_started: "Playlist lancée",
-  playback_stopped: "Lecture arrêtée",
-  playlist_created: "Playlist créée",
-  playlist_updated: "Playlist modifiée",
-  playlist_deleted: "Playlist supprimée",
-  schedule_created: "Programmation créée",
-  schedule_updated: "Programmation modifiée",
-  schedule_deleted: "Programmation supprimée",
-  schedule_override_created: "Override de programmation",
-};
-
-function formatTimestamp(iso: string) {
+function formatTimestamp(iso: string, language: Language) {
   const d = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
-  return d.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" });
+  return d.toLocaleString(language === "fr" ? "fr-FR" : "en-US", { dateStyle: "short", timeStyle: "medium" });
 }
 
 export default function LogsPage() {
+  const { t, language } = useAppSettings();
+  const EVENT_LABELS: Record<string, string> = {
+    video_imported: t("logs.eventLabels.video_imported"),
+    background_imported: t("logs.eventLabels.background_imported"),
+    audio_course_imported: t("logs.eventLabels.audio_course_imported"),
+    video_started: t("logs.eventLabels.video_started"),
+    background_started: t("logs.eventLabels.background_started"),
+    audio_course_started: t("logs.eventLabels.audio_course_started"),
+    playlist_started: t("logs.eventLabels.playlist_started"),
+    playback_stopped: t("logs.eventLabels.playback_stopped"),
+    playlist_created: t("logs.eventLabels.playlist_created"),
+    playlist_updated: t("logs.eventLabels.playlist_updated"),
+    playlist_deleted: t("logs.eventLabels.playlist_deleted"),
+    schedule_created: t("logs.eventLabels.schedule_created"),
+    schedule_updated: t("logs.eventLabels.schedule_updated"),
+    schedule_deleted: t("logs.eventLabels.schedule_deleted"),
+    schedule_override_created: t("logs.eventLabels.schedule_override_created"),
+  };
   const [tab, setTab] = useState<"activity" | "technical">("activity");
   const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
   const [eventTypes, setEventTypes] = useState<string[]>([]);
@@ -76,7 +78,7 @@ export default function LogsPage() {
     fetch(getApiUrl("/logs/technical"), { cache: "no-store" })
       .then((res) => (res.ok ? res.text() : ""))
       .then(setTechnicalLog)
-      .catch(() => setTechnicalLog("Impossible de charger le log technique."))
+      .catch(() => setTechnicalLog(t("logs.technicalLoadError")))
       .finally(() => setTechnicalLoading(false));
   };
 
@@ -89,10 +91,10 @@ export default function LogsPage() {
     <div className="library-container">
       <div className="view-toggle" style={{ width: "fit-content" }}>
         <button className={`view-btn ${tab === "activity" ? "active" : ""}`} onClick={() => setTab("activity")}>
-          Activité
+          {t("logs.activityTab")}
         </button>
         <button className={`view-btn ${tab === "technical" ? "active" : ""}`} onClick={() => setTab("technical")}>
-          Technique
+          {t("logs.technicalTab")}
         </button>
       </div>
 
@@ -101,38 +103,38 @@ export default function LogsPage() {
           <div className="library-toolbar">
             <div className="toolbar-filters">
               <select className="filter-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
-                <option value="">Tous les types d&apos;évènement</option>
-                {eventTypes.map((t) => (
-                  <option key={t} value={t}>
-                    {EVENT_LABELS[t] || t}
+                <option value="">{t("logs.allEventTypes")}</option>
+                {eventTypes.map((eventType) => (
+                  <option key={eventType} value={eventType}>
+                    {EVENT_LABELS[eventType] || eventType}
                   </option>
                 ))}
               </select>
               <button className="btn btn-secondary" onClick={fetchActivity}>
-                Rafraîchir
+                {t("logs.refresh")}
               </button>
             </div>
           </div>
 
           {loading ? (
-            <div className="live-empty">Chargement du log d&apos;activité...</div>
+            <div className="live-empty">{t("logs.loadingActivity")}</div>
           ) : entries.length === 0 ? (
-            <div className="live-empty">Aucune activité enregistrée pour le moment.</div>
+            <div className="live-empty">{t("logs.noActivity")}</div>
           ) : (
             <div className="table-wrapper">
               <table className="videos-table">
                 <thead>
                   <tr>
-                    <th style={{ width: "180px" }}>Horodatage</th>
-                    <th style={{ width: "220px" }}>Évènement</th>
-                    <th>Détail</th>
+                    <th style={{ width: "180px" }}>{t("logs.timestampHeader")}</th>
+                    <th style={{ width: "220px" }}>{t("logs.eventHeader")}</th>
+                    <th>{t("logs.detailHeader")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {entries.map((entry) => (
                     <tr key={entry.id}>
                       <td style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
-                        {formatTimestamp(entry.timestamp)}
+                        {formatTimestamp(entry.timestamp, language)}
                       </td>
                       <td style={{ fontWeight: 700 }}>{EVENT_LABELS[entry.event_type] || entry.event_type}</td>
                       <td style={{ color: "var(--text-muted)" }}>{entry.detail || "—"}</td>
@@ -148,10 +150,10 @@ export default function LogsPage() {
           <div className="library-toolbar">
             <div className="toolbar-filters">
               <button className="btn btn-secondary" onClick={fetchTechnical}>
-                Rafraîchir
+                {t("logs.refresh")}
               </button>
               <a href={getApiUrl("/logs/technical/download")} download className="btn btn-secondary">
-                Télécharger le log complet
+                {t("logs.downloadFullLog")}
               </a>
             </div>
           </div>
@@ -169,7 +171,7 @@ export default function LogsPage() {
               maxHeight: "calc(100vh - 260px)",
             }}
           >
-            {technicalLoading ? "Chargement..." : technicalLog || "Log technique vide."}
+            {technicalLoading ? t("logs.loading") : technicalLog || t("logs.emptyTechnicalLog")}
           </div>
         </>
       )}

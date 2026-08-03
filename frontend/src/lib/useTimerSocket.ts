@@ -10,6 +10,12 @@ export interface TimerState {
   remaining_seconds: number | null;
   elapsed_seconds: number | null;
   ended: boolean;
+  // Instants serveur absolus (epoch ms, réf. audit plan-corrections-bugs,
+  // point 7) : permettent une interpolation locale fluide côté kiosk plutôt
+  // que de dépendre du tick serveur à 1 Hz. null quand non pertinent
+  // (arrêté/en pause).
+  ends_at: number | null;
+  started_at: number | null;
 }
 
 export interface TimerEvent {
@@ -24,12 +30,14 @@ const DEFAULT_STATE: TimerState = {
   remaining_seconds: null,
   elapsed_seconds: null,
   ended: false,
+  ends_at: null,
+  started_at: null,
 };
 
 function getWsUrl(): string {
   if (typeof window === "undefined") return "";
   const isDevServer = window.location.port === "3000";
-  const host = isDevServer ? "localhost:8000" : window.location.host;
+  const host = isDevServer ? "localhost:8001" : window.location.host;
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${host}/ws/timer`;
 }

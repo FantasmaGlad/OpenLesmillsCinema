@@ -1,21 +1,33 @@
 /* OpenLesmillsCinema — Global Styles & Design System */
 
 :root {
-  /* Colors - Les Mills Dark Theme */
+  /* Colors - Les Mills Dark Theme (thème par défaut, réf. UX1.1) */
   --bg-main: #0a0a0a;
   --bg-surface: #141414;
   --bg-surface-elevated: #1e1e20;
   --bg-surface-hover: #262629;
-  
+
   --text-main: #ffffff;
   --text-muted: #8e8e93;
-  --text-dim: #5c5c60;
+  /* #828288 plutôt que la valeur d'origine #5c5c60 (2.97:1 sur --bg-main) :
+     utilisé pour du vrai texte (aides de formulaire, sous-titres), pas
+     seulement décoratif — remonté pour passer le seuil WCAG AA texte normal
+     (4.5:1), réf. UX6.2/tâche 11.7. Vérifié : 5.18:1 sur --bg-main, 4.82:1
+     sur --bg-surface. */
+  --text-dim: #828288;
 
   --border-color: #2c2c2e;
   --border-focus: #48484a;
 
   /* Accent Colors */
   --accent-primary: #e4002b; /* Les Mills Red */
+  /* Couleur de texte/icône lisible posée SUR --accent-primary (réf. mission
+     "100% des éléments sur le thème") : recalculée par thème (luminance WCAG
+     réelle de l'accent — blanc sur les accents foncés, encre sombre sur les
+     accents clairs). À utiliser partout où un élément a l'accent en fond
+     plein (btn-primary, badge héros cinéma, bouton play coach...), jamais un
+     blanc codé en dur. */
+  --accent-primary-fg: #ffffff;
   --accent-rpm: #e4002b;
   --accent-sprint: #ffb81c;
   --accent-trip: #8a2be2; /* Vibrant violet-blue */
@@ -38,6 +50,209 @@
   /* Transitions */
   --transition-fast: 0.15s ease;
   --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Logo (réf. mission "remplace le logo") : le fichier fourni est un
+     pictogramme noir pur sur fond transparent — invisible sur un fond sombre
+     sans inversion. Les thèmes clairs (clair, menthe) annulent ce filtre. */
+  --logo-filter: invert(1);
+}
+
+/* Thème clair alternatif (réf. UX1.2, tâche 11.3) : appliqué via l'attribut
+   data-theme posé sur <html> par AppSettingsProvider (réf. 11.4/11.5), pas
+   une media query — le choix est un réglage persisté côté serveur (UX1.4),
+   pas la préférence système du navigateur. Les couleurs de programme
+   (RPM/Trip) restent identiques entre thèmes, identité de marque (§1.2) ; le
+   jaune Sprint est en revanche assombri ici (accent-sprint) pour rester
+   lisible en texte sur fond clair (le jaune d'origine tombe à ~1.6:1 sur
+   blanc, illisible) — seul accent_par_programme réellement redéfini par
+   thème. */
+:root[data-theme="clair"] {
+  --bg-main: #f4f4f5;
+  --bg-surface: #ffffff;
+  --bg-surface-elevated: #ffffff;
+  --bg-surface-hover: #ececee;
+
+  --text-main: #16161a;
+  --text-muted: #55555c;
+  --text-dim: #75757c;
+
+  --border-color: #e1e1e4;
+  --border-focus: #b8b8bd;
+
+  --accent-sprint: #8a5a00;
+  --logo-filter: none;
+}
+
+/* Thèmes additionnels (mission UI/UX "thèmes cinéma") : même principe que
+   "clair" ci-dessus — seules les couleurs de surface/texte/accent-primary
+   changent, RPM/Trip restent la même identité de marque partout. Diffusés en
+   temps réel à tous les écrans (admin, mobile, kiosk, cinéma, pause) via
+   l'évènement WebSocket settings_change (réf. AppSettingsContext.tsx). */
+:root[data-theme="lune"] {
+  --bg-main: #131229;
+  --bg-surface: #1b1a38;
+  --bg-surface-elevated: #292966;
+  --bg-surface-hover: #34335f;
+
+  --text-main: #f1f0ff;
+  --text-muted: #a3a3cc;
+  --text-dim: #85859e;
+
+  --border-color: #2e2d52;
+  --border-focus: #5c5c99;
+
+  --accent-primary: #8484e6;
+  --accent-primary-fg: #161116;
+}
+
+:root[data-theme="menthe"] {
+  --bg-main: #eafff5;
+  --bg-surface: #ffffff;
+  --bg-surface-elevated: #ffffff;
+  --bg-surface-hover: #d9fbe9;
+
+  --text-main: #0f2e22;
+  --text-muted: #3f6b58;
+  --text-dim: #5c8a76;
+
+  --border-color: #bfeedb;
+  --border-focus: #7fcfa8;
+
+  --accent-primary: #2f9e6e;
+  --accent-primary-fg: #161116;
+  --accent-sprint: #8a5a00;
+  --logo-filter: none;
+}
+
+:root[data-theme="automne"] {
+  --bg-main: #1a120a;
+  --bg-surface: #241a0f;
+  --bg-surface-elevated: #614419;
+  --bg-surface-hover: #7a5722;
+
+  --text-main: #fff3e0;
+  --text-muted: #db9a39;
+  --text-dim: #a97f3f;
+
+  --border-color: #3a2a17;
+  --border-focus: #b37e2e;
+
+  --accent-primary: #ffb343;
+  --accent-primary-fg: #161116;
+}
+
+:root[data-theme="hiver"] {
+  --bg-main: #071b1f;
+  --bg-surface: #0b2429;
+  --bg-surface-elevated: #0b2e33;
+  --bg-surface-hover: #123842;
+
+  --text-main: #e8f7f9;
+  --text-muted: #93b1b5;
+  --text-dim: #6f9296;
+
+  --border-color: #163a41;
+  --border-focus: #4f7c82;
+
+  --accent-primary: #6fd6e6;
+  --accent-primary-fg: #161116;
+}
+
+:root[data-theme="chili"] {
+  --bg-main: #170203;
+  --bg-surface: #240508;
+  --bg-surface-elevated: #38000a;
+  --bg-surface-hover: #4a0a10;
+
+  --text-main: #fff0ee;
+  --text-muted: #ffa896;
+  --text-dim: #d98a7a;
+
+  --border-color: #3d0d10;
+  --border-focus: #9b1313;
+
+  --accent-primary: #cd1c18;
+}
+
+/* Bleu Ciel (réf. mission thèmes) : thème clair — palette fournie
+   Blanc #FFFFFF / #2E6C7B / #4A9DAE / #77CBDA / #B3EBF2. Le texte principal
+   est un dérivé assombri de #2E6C7B pour tenir le contraste WCAG AA sur
+   fond blanc, même logique que le thème "clair". */
+:root[data-theme="ciel"] {
+  --bg-main: #b3ebf2;
+  --bg-surface: #ffffff;
+  --bg-surface-elevated: #ffffff;
+  --bg-surface-hover: #d9f6fa;
+
+  --text-main: #14333b;
+  --text-muted: #2e6c7b;
+  --text-dim: #4a9dae;
+
+  --border-color: #a4dfe9;
+  --border-focus: #77cbda;
+
+  --accent-primary: #2e6c7b;
+  --accent-sprint: #8a5a00;
+  --logo-filter: none;
+}
+
+/* Violet Orchidée (réf. mission thèmes) : thème sombre — palette fournie
+   Blanc #FFFFFF / #4F2B4E / #784176 / #C96DC6 / #ED80E9. */
+:root[data-theme="orchidee"] {
+  --bg-main: #2b172a;
+  --bg-surface: #3c203b;
+  --bg-surface-elevated: #4f2b4e;
+  --bg-surface-hover: #5e3a5d;
+
+  --text-main: #ffffff;
+  --text-muted: #ed80e9;
+  --text-dim: #c96dc6;
+
+  --border-color: #4f2b4e;
+  --border-focus: #784176;
+
+  --accent-primary: #c96dc6;
+  --accent-primary-fg: #161116;
+}
+
+/* Taupe (réf. mission thèmes) : thème sombre chaud — palette fournie
+   Blanc #FFFFFF / #54463A / #826D5A / #AB8F76 / #FCD3AE. Même construction
+   que "orchidee" : fonds dérivés assombris du marron foncé, la couleur la
+   plus claire sert de texte secondaire. */
+:root[data-theme="taupe"] {
+  --bg-main: #241e19;
+  --bg-surface: #322a23;
+  --bg-surface-elevated: #54463a;
+  --bg-surface-hover: #61503f;
+
+  --text-main: #ffffff;
+  --text-muted: #fcd3ae;
+  --text-dim: #ab8f76;
+
+  --border-color: #54463a;
+  --border-focus: #826d5a;
+
+  --accent-primary: #ab8f76;
+  --accent-primary-fg: #161116;
+}
+
+/* Charbon (réf. mission thèmes) : thème sombre neutre — palette fournie
+   Blanc #FFFFFF / #1A1A1A / #4A4A4A / #A1A1A1 / #F2F2F2. */
+:root[data-theme="charbon"] {
+  --bg-main: #111111;
+  --bg-surface: #1a1a1a;
+  --bg-surface-elevated: #2b2b2b;
+  --bg-surface-hover: #383838;
+
+  --text-main: #ffffff;
+  --text-muted: #f2f2f2;
+  --text-dim: #a1a1a1;
+
+  --border-color: #2e2e2e;
+  --border-focus: #4a4a4a;
+
+  --accent-primary: #a1a1a1;
+  --accent-primary-fg: #161116;
 }
 
 /* Base resets */
@@ -115,6 +330,142 @@ h1, h2, h3, h4, h5, h6 {
   animation: slideInRight var(--transition-normal);
 }
 
+/* ---------------------------------------------------------------------
+   Icônes Material Symbols (réf. mission UI/UX) — police variable Google
+   chargée dans layout.tsx. Le composant Icon.tsx pilote la variation
+   (taille/graisse/remplissage) via style inline ; cette classe ne fixe
+   que les réglages communs.
+--------------------------------------------------------------------- */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-flex;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  vertical-align: middle;
+}
+
+/* ---------------------------------------------------------------------
+   Animations partagées — dynamisme de l'interface (réf. mission UI/UX) :
+   entrée de cartes/listes, retour visuel au clic, pastille de statut qui
+   respire, apparition « punchy » façon compteur (inspirée du prototype de
+   design importé), scintillement de chargement.
+--------------------------------------------------------------------- */
+@keyframes olcSlideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes olcScaleIn {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes olcPop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes olcPulseDot {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+  50% { box-shadow: 0 0 0 4px transparent; opacity: 0.55; }
+}
+@keyframes olcShimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+@keyframes olcSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.olc-anim-in {
+  animation: olcSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/* Icône de traitement en cours (réf. retour utilisateur "l'importation des
+   fonds animés bloque et ne termine jamais") : signale qu'un travail serveur
+   se poursuit après la fin d'un transfert réseau. */
+.olc-spin {
+  animation: olcSpin 1s linear infinite;
+}
+
+/* Barre de progression indéterminée (réf. mission "voir en direct les
+   importations") : le traitement serveur d'un import (analyse/réencodage/
+   miniature) n'a pas de progression numérique fiable à afficher — ce
+   balayage signale une activité réelle plutôt qu'une barre figée. */
+.olc-indeterminate-bar {
+  height: 100%;
+  width: 40%;
+  border-radius: 2px;
+  animation: olcIndeterminate 1.2s ease-in-out infinite;
+}
+@keyframes olcIndeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+.olc-anim-pop {
+  animation: olcPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.olc-anim-scale-in {
+  animation: olcScaleIn 0.2s ease both;
+}
+
+/* Lift + accent border au survol des cartes (bibliothèque, fonds animés,
+   cours audio, playlists…) — appliquer en plus de la classe existante de
+   la carte, ne redéfinit aucune couleur/fond. */
+.olc-card-hover {
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+.olc-card-hover:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+  border-color: var(--border-focus);
+}
+
+/* Retour visuel au clic — à poser sur tout élément interactif (boutons,
+   lignes cliquables) pour un feedback tactile net sur PC comme sur mobile.
+   user-select/-webkit-touch-callout (réf. correctif "Stop mobile ne marche
+   pas") : sans ça, un appui MAINTENU sur un vrai téléphone (ex. le bouton
+   Stop en appui long de MobileRemote) peut déclencher le menu contextuel
+   natif du navigateur (sélection de texte / callout iOS) avant la fin du
+   délai, qui interrompt le geste — invisible en test automatisé (évènements
+   synthétiques), seulement sur un écran tactile réel. */
+.olc-press {
+  transition: transform 0.12s ease, filter 0.12s ease;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.olc-press:active {
+  transform: scale(0.96);
+  filter: brightness(0.94);
+}
+
+/* Pastille de statut « en vie » : respire doucement quand un état actif
+   est en cours (lecture en direct, kiosk connecté…). */
+.olc-live-dot {
+  animation: olcPulseDot 1.8s ease-in-out infinite;
+}
+
+.olc-skeleton {
+  background: linear-gradient(90deg, var(--bg-surface-elevated) 25%, var(--bg-surface-hover) 50%, var(--bg-surface-elevated) 75%);
+  background-size: 200% 100%;
+  animation: olcShimmer 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .olc-anim-in, .olc-anim-pop, .olc-anim-scale-in, .olc-live-dot, .olc-skeleton,
+  .dashboard-container > *, .status-pill.ok::before {
+    animation: none !important;
+  }
+  .olc-card-hover, .olc-press, .btn, .close-btn {
+    transition: none !important;
+  }
+}
+
 /* Common Layout Components */
 .app-container {
   display: flex;
@@ -139,20 +490,25 @@ h1, h2, h3, h4, h5, h6 {
 .sidebar-brand {
   display: flex;
   align-items: center;
+  /* Logo imposant façon Netflix (réf. mission logo) : centré et pleine
+     largeur de la sidebar plutôt qu'une petite vignette alignée à gauche. */
+  justify-content: center;
   gap: 12px;
-  padding: 0 12px 24px 12px;
+  padding: 4px 12px 20px 12px;
   border-bottom: 1px solid var(--border-color);
 }
 
-.brand-logo {
-  font-family: var(--font-title);
-  font-size: 1.2rem;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  background: linear-gradient(135deg, #ffffff 30%, var(--accent-primary) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+/* Le fichier logo fourni est un pictogramme noir pur sur fond transparent :
+   sans ce filtre il est invisible sur toute surface sombre (sidebar admin,
+   bandeau de pause). Inversé par défaut, désactivé sur les thèmes clairs
+   (--logo-filter, réf. blocs de thème ci-dessus). */
+.app-logo {
+  filter: var(--logo-filter);
 }
+
+/* .brand-logo est maintenant une image (réf. mission "remplace le logo"),
+   plus un effet de dégradé sur du texte — la classe ne sert plus qu'à cibler
+   l'élément (masquage en sidebar réduite ci-dessous). */
 
 .sidebar-nav {
   display: flex;
@@ -398,7 +754,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 .upload-zone:hover, .upload-zone.drag-active {
   border-color: var(--accent-primary);
-  background: rgba(228, 0, 43, 0.03);
+  background: color-mix(in srgb, var(--accent-primary) 3%, transparent);
 }
 
 .upload-icon {
@@ -454,18 +810,17 @@ h1, h2, h3, h4, h5, h6 {
   border-color: var(--border-focus);
 }
 
-/* Program Specific Borders */
-.video-card.program-rpm {
-  border-left: 4px solid var(--accent-rpm);
-}
-.video-card.program-sprint {
-  border-left: 4px solid var(--accent-sprint);
-}
-.video-card.program-the-trip {
-  border-left: 4px solid var(--accent-trip);
-}
+/* Liseré de gauche : couleur du THÈME plutôt que du programme du cours (réf.
+   correctif "couleurs hardcodées associées à un cours" — le thème prime
+   désormais sur RPM/Sprint/The Trip, qui restaient rouge/jaune/violet fixes
+   sur tous les thèmes). Les 4 classes restent posées par les pages
+   Bibliothèque/Cours Audio (regroupement par programme), mais pointent
+   maintenant toutes vers la même variable. */
+.video-card.program-rpm,
+.video-card.program-sprint,
+.video-card.program-the-trip,
 .video-card.program-autre {
-  border-left: 4px solid var(--accent-other);
+  border-left: 4px solid var(--accent-primary);
 }
 
 .thumbnail-wrapper {
@@ -538,28 +893,19 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: 0.05em;
 }
 
-.program-badge.rpm {
-  background: rgba(228, 0, 43, 0.15);
-  color: #ff453a;
-  border: 1px solid rgba(228, 0, 43, 0.3);
-}
-
-.program-badge.sprint {
-  background: rgba(255, 184, 28, 0.15);
-  color: var(--accent-sprint);
-  border: 1px solid rgba(255, 184, 28, 0.3);
-}
-
-.program-badge.the-trip {
-  background: rgba(138, 43, 226, 0.15);
-  color: #bf5af2;
-  border: 1px solid rgba(138, 43, 226, 0.3);
-}
-
+/* Couleur du thème plutôt que du programme du cours (réf. correctif
+   "couleurs hardcodées associées à un cours" — le thème prime désormais sur
+   RPM/Sprint/The Trip, qui restaient rouge/jaune/violet fixes sur tous les
+   thèmes). Les 4 classes restent posées par les pages Bibliothèque/Cours
+   Audio/Playlists (JS pas encore nettoyé de cette distinction), mais
+   pointent maintenant toutes vers le même accent de thème. */
+.program-badge.rpm,
+.program-badge.sprint,
+.program-badge.the-trip,
 .program-badge.autre {
-  background: rgba(99, 99, 102, 0.15);
-  color: var(--text-muted);
-  border: 1px solid rgba(99, 99, 102, 0.3);
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+  color: var(--accent-primary);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, transparent);
 }
 
 .release-badge {
@@ -695,6 +1041,52 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-muted);
 }
 
+/* Sélecteur visuel de thème (réf. mission "thèmes cinéma") : vignette à 4
+   couleurs par thème plutôt qu'un simple menu déroulant textuel. */
+.theme-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.theme-picker-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-surface-elevated);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 10px;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.theme-picker-card:hover {
+  transform: translateY(-2px);
+}
+
+.theme-picker-card.active {
+  border-color: var(--accent-primary);
+}
+
+.theme-picker-swatch {
+  display: flex;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.theme-picker-swatch span {
+  flex: 1;
+}
+
+.theme-picker-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-main);
+  text-align: center;
+}
+
 .form-control {
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-color);
@@ -727,15 +1119,30 @@ h1, h2, h3, h4, h5, h6 {
   justify-content: center;
   gap: 8px;
   border: none;
-  transition: all var(--transition-fast);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background var(--transition-fast), border-color var(--transition-fast);
+}
+/* Dynamisme au survol/clic (réf. mission UI/UX), app entière : un léger
+   soulèvement au survol, un retour "pressé" au clic — appliqué une seule
+   fois ici plutôt que dupliqué sur chaque bouton de chaque page. */
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.96) translateY(0);
+}
+.btn:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .btn-primary {
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--accent-primary-fg);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--accent-primary) 25%, transparent);
 }
-.btn-primary:hover {
-  background: #c20024;
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-primary) 85%, #000);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent-primary) 35%, transparent);
 }
 
 .btn-secondary {
@@ -743,8 +1150,9 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-main);
   border: 1px solid var(--border-color);
 }
-.btn-secondary:hover {
+.btn-secondary:hover:not(:disabled) {
   background: var(--bg-surface-hover);
+  border-color: var(--border-focus);
 }
 
 .btn-danger {
@@ -752,7 +1160,7 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--accent-error);
   border: 1px solid rgba(255, 69, 58, 0.2);
 }
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
   background: rgba(255, 69, 58, 0.1);
   border-color: var(--accent-error);
 }
@@ -767,11 +1175,15 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--transition-fast);
+  transition: all var(--transition-fast), transform 0.15s ease;
 }
 .close-btn:hover {
   background: var(--bg-surface-hover);
   color: var(--text-main);
+  transform: rotate(90deg);
+}
+.close-btn:active {
+  transform: rotate(90deg) scale(0.9);
 }
 
 /* Dialog / Modal Confirmation */
@@ -858,6 +1270,38 @@ h1, h2, h3, h4, h5, h6 {
   gap: 16px;
 }
 
+.launch-block h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Sections "Lancer un cours" câblée/réseau côte à côte (réf. mission, point
+   3) : deux lancements indépendants vers le même écran partagé, distingués
+   uniquement par où le son sera audible (câblé) ou muet (réseau). */
+.launch-block-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.launch-block-hint {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: -8px 0 0;
+}
+
+.launch-block-row-notice {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .launch-block-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .live-header {
   display: flex;
   align-items: center;
@@ -881,6 +1325,57 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--accent-error);
   border-color: rgba(255, 69, 58, 0.3);
 }
+
+/* Canal en mode cinéma (réf. canaux indépendants) : ni "en direct" (vert) ni
+   "hors ligne" (rouge), un état neutre à part entière. */
+.status-pill.neutral {
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+  color: var(--accent-primary);
+  border-color: color-mix(in srgb, var(--accent-primary) 30%, transparent);
+}
+
+/* Deux cartes de canal côte à côte (réf. canaux indépendants câblé/réseau). */
+.channel-cards-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.channel-card {
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .channel-cards-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Petit point qui respire devant le libellé "ok" (réf. mission UI/UX,
+   dynamisme) : signale un état réellement vivant plutôt qu'un simple texte. */
+.status-pill.ok::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 6px;
+  animation: olcPulseDot 1.8s ease-in-out infinite;
+}
+
+/* Entrée en cascade des blocs du tableau de bord (réf. mission UI/UX) —
+   chaque bloc apparaît en glissant légèrement, décalé du précédent. */
+.dashboard-container > * {
+  animation: olcSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.dashboard-container > *:nth-child(1) { animation-delay: 0ms; }
+.dashboard-container > *:nth-child(2) { animation-delay: 40ms; }
+.dashboard-container > *:nth-child(3) { animation-delay: 80ms; }
+.dashboard-container > *:nth-child(4) { animation-delay: 120ms; }
+.dashboard-container > *:nth-child(5) { animation-delay: 160ms; }
+.dashboard-container > *:nth-child(6) { animation-delay: 200ms; }
+.dashboard-container > *:nth-child(n+7) { animation-delay: 240ms; }
 
 .live-title {
   font-size: 1.3rem;
@@ -947,7 +1442,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .speed-btn.active {
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--accent-primary-fg);
 }
 
 .volume-row {
@@ -981,7 +1476,20 @@ h1, h2, h3, h4, h5, h6 {
 .kiosk-root {
   position: fixed;
   inset: 0;
-  background: #000;
+  /* Contexte de container query (réf. Lot 12) : les éléments de canvas
+     dimensionnent leur texte en `cqh` (% de la hauteur de CE conteneur)
+     plutôt qu'en `vh` (% de la fenêtre du navigateur), pour que la même
+     composition JSON s'affiche à l'identique ici (plein écran) et dans la
+     petite prévisualisation 16:9 de l'éditeur PC (.canvas-editor-stage,
+     même unité). Sans effet visuel ici : kiosk-root occupe déjà 100% de la
+     fenêtre, cqh y vaut donc la même chose que vh. */
+  container-type: size;
+  /* var(--bg-main) plutôt que #000 en dur : l'écran d'attente doit suivre le
+     thème actif (réf. UX2.3/tâche 11.4). Sans effet sur la lecture vidéo
+     elle-même : .kiosk-video-layer (ci-dessous) est un calque plein cadre
+     opaque et toujours noir, qui recouvre entièrement ce fond pendant la
+     lecture. */
+  background: var(--bg-main);
   overflow: hidden;
   cursor: none;
 }
@@ -995,7 +1503,10 @@ h1, h2, h3, h4, h5, h6 {
   justify-content: center;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.5s ease;
+  /* Court et sans backdrop-filter (réf. correctif fluidité cinéma) : le GPU
+     intégré du Wyse (Gemini Lake) sature sur les flous recalculés en continu
+     pendant la lecture vidéo, provoquant des saccades visibles. */
+  transition: opacity 0.12s ease;
 }
 
 .kiosk-layer.visible {
@@ -1019,20 +1530,25 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: 0.1em;
 }
 
-.kiosk-countdown-number {
-  font-family: var(--font-title);
-  font-size: 22vh;
-  font-weight: 900;
-  line-height: 1;
-  text-shadow: 0 0 60px currentColor;
+/* Fallback affiché quand aucun canvas "En attente" n'est configuré dans
+   l'admin (réf. Bug 3 / B3) : fond sombre neutre avec l'heure centrée pour
+   éviter l'écran 100% noir après un Stop. */
+/* Logo imposant sur les écrans d'attente (réf. mission logo) : signe la
+   paternité du projet sur l'écran d'attente par défaut et l'attente
+   inter-cours, façon écran d'accueil de plateforme de streaming. */
+.kiosk-waiting-logo {
+  margin-bottom: 32px;
+  opacity: 0.95;
 }
 
-.kiosk-countdown-title {
-  margin-top: 24px;
-  font-size: 2rem;
-  color: var(--text-main);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+.kiosk-waiting-default {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, var(--bg-surface) 0%, var(--bg-main) 100%);
 }
 
 .kiosk-video-layer {
@@ -1053,8 +1569,7 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: rgba(10, 10, 10, 0.75);
-  backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--bg-main) 92%, transparent);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   padding: 16px 32px;
@@ -1063,6 +1578,35 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-main);
   animation: fadeIn 0.2s ease;
   z-index: 20;
+}
+
+/* Bandeau "Activer le son" (réf. correctif "kiosk réseau figé") : contrairement
+   à l'OSD ci-dessus, ne disparaît PAS tout seul — un appareil réseau qui a
+   bloqué l'autoplay avec son reste bloqué tant que personne ne tape dessus,
+   donc pas de timer de masquage automatique. Zone tactile généreuse, cliquable
+   depuis n'importe où sur l'écran d'un téléphone. */
+.kiosk-unlock-audio {
+  position: absolute;
+  bottom: 8%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* Fond neutre du thème (pas l'accent en pleine teinte) : le contraste avec
+     un texte fixe resterait correct sur tous les thèmes sans calcul dédié,
+     même motif que .pause-resume-btn. */
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  border: 2px solid var(--accent-primary);
+  border-radius: var(--radius-lg);
+  padding: 16px 32px;
+  font-size: 1.15rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.35);
+  animation: fadeIn 0.2s ease;
+  z-index: 25;
 }
 
 /* ============================================================
@@ -1113,71 +1657,275 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* ============================================================
-   Overlay de pause thémé (Lot 4, F1.4/UX2.11)
+   Rendu dynamique du canvas (Lot 12, réf. UX2.1/UX2.2/12.2) — remplace
+   l'habillage figé du Lot 4 par des éléments positionnés depuis la
+   composition active (JSON), partagé entre le kiosk et la prévisualisation
+   de l'éditeur PC.
    ============================================================ */
+.canvas-render-root {
+  position: absolute;
+  inset: 0;
+}
+
+.canvas-render-element {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  text-align: center;
+}
+
+.canvas-el-placeholder {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+}
+
+.canvas-el-clock {
+  font-family: var(--font-title);
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-el-text {
+  font-family: var(--font-title);
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: 0.08em;
+  white-space: pre-wrap;
+}
+
+.canvas-el-next-course,
+.canvas-el-timer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-main);
+}
+
+.canvas-el-next-course-label,
+.canvas-el-timer-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-weight: 700;
+}
+
+.canvas-el-next-course-title {
+  font-family: var(--font-title);
+  font-weight: 800;
+  color: var(--accent-primary);
+  text-transform: uppercase;
+}
+
+.canvas-el-next-course-empty {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.canvas-el-next-course-countdown,
+.canvas-el-countdown,
+.canvas-el-timer-value {
+  font-family: var(--font-title);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.canvas-el-countdown {
+  color: var(--text-main);
+  text-shadow: 0 0 60px currentColor;
+}
+
+.canvas-el-timer-ended .canvas-el-timer-value {
+  color: var(--accent-error);
+  animation: timerPulseFullscreen 1.2s ease-in-out infinite;
+}
+
+/* ============================================================
+   Overlay de pause façon plateforme de streaming (Lot 4, F1.4/UX2.11 ;
+   réf. mission UI/UX "écran de pause style YouTube")
+   ============================================================
+   Vidéo assombrie mais visible en fond (scrim translucide), bouton de
+   reprise circulaire au centre, bandeau d'info ancré en bas à gauche, barre
+   de progression pleine largeur au tout bord inférieur — plus de rendu
+   canvas générique dont le texte pouvait chevaucher icône/barre (réf.
+   correctif "informations qui se chevauchent"). Accent lié au THÈME
+   (var(--accent-primary)) plutôt qu'à la couleur du programme en pause
+   (réf. correctif "violet ne va pas avec le thème sombre") : une teinte de
+   marque par cours est pertinente pour un compte à rebours de quelques
+   secondes, beaucoup moins pour un écran de pause qui peut rester affiché
+   longtemps. */
 .pause-overlay {
   position: absolute;
   inset: 0;
   z-index: 15;
+  background: color-mix(in srgb, var(--bg-main) 45%, transparent);
+  animation: fadeIn 0.12s ease;
+}
+
+.pause-overlay-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 70% 60% at 50% 45%, color-mix(in srgb, var(--bg-main) 55%, transparent) 0%, transparent 72%);
+  pointer-events: none;
+}
+
+.pause-resume-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  border: none;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  background: rgba(10, 10, 10, 0.55);
-  backdrop-filter: blur(8px);
-  animation: fadeIn var(--transition-normal);
+  background: color-mix(in srgb, var(--bg-main) 55%, transparent);
+  /* Le disque prend la teinte du thème (bg-main) : une icône blanche fixe
+     devenait quasi invisible sur les thèmes clairs (réf. correctif "boutons
+     cinéma/kiosk hors thème" — même bug que .cinema-hero-play). */
+  color: var(--text-main);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-main) 25%, transparent), 0 10px 40px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease;
 }
 
-.pause-title {
+.pause-resume-btn:hover {
+  transform: translate(-50%, -50%) scale(1.08);
+  background: color-mix(in srgb, var(--accent-primary) 70%, transparent);
+}
+
+.pause-info-bar {
+  position: absolute;
+  left: 5%;
+  bottom: 7%;
+  max-width: 60%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.pause-info-logo {
+  flex-shrink: 0;
+  opacity: 0.95;
+}
+
+.pause-info-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pause-info-eyebrow {
+  font-size: 0.85rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+}
+
+.pause-info-title {
   font-family: var(--font-title);
-  font-size: 2.2rem;
+  font-size: 2.4rem;
   font-weight: 800;
   color: var(--text-main);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
 
-.pause-label {
-  font-family: var(--font-title);
-  font-size: 5rem;
-  font-weight: 900;
-  color: var(--accent-primary);
-  letter-spacing: 0.2em;
+.pause-info-meta {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
+/* Barre de progression pleine largeur au bord de l'écran, façon lecteur
+   vidéo de plateforme de streaming — plus proéminente que l'ancienne barre
+   centrée à largeur fixe. */
 .pause-progress-track {
-  width: 40%;
-  max-width: 500px;
-  height: 8px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.15);
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 5px;
+  background: color-mix(in srgb, var(--text-main) 18%, transparent);
   overflow: hidden;
 }
 
 .pause-progress-fill {
   height: 100%;
   background: var(--accent-primary);
-  transition: width 0.3s linear;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-primary) 70%, transparent);
+  transition: width 0.15s linear;
 }
 
 /* ============================================================
    Minuteur/chronomètre — overlay kiosk (Lot 4, UX2.4-2.7)
    ============================================================ */
-.timer-overlay {
+.timer-overlay.timer-fullscreen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, var(--bg-surface) 0%, var(--bg-main) 100%);
+}
+
+.timer-overlay.timer-fullscreen .timer-label {
+  font-family: var(--font-title);
+  font-size: 3vh;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4em;
+  color: var(--text-muted);
+  margin-bottom: 2vh;
+}
+
+.timer-overlay.timer-fullscreen .timer-value {
+  font-family: var(--font-title);
+  font-size: 24vh;
+  font-weight: 900;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-shadow: 0 0 50px rgba(255, 255, 255, 0.1);
+}
+
+.timer-overlay.timer-pill {
   position: absolute;
   bottom: 6%;
   left: 50%;
   transform: translateX(-50%);
   z-index: 18;
-  background: rgba(10, 10, 10, 0.7);
-  backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--bg-main) 94%, transparent);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 20px 48px;
+  padding: 16px 40px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
 }
 
-.timer-value {
+.timer-overlay.timer-pill .timer-value {
   font-family: var(--font-title);
   font-size: 6vh;
   font-weight: 900;
@@ -1185,13 +1933,32 @@ h1, h2, h3, h4, h5, h6 {
   font-variant-numeric: tabular-nums;
 }
 
-.timer-overlay.timer-ended {
-  animation: timerPulse 1s ease-in-out infinite;
+.timer-overlay.timer-fullscreen.timer-ended {
+  animation: timerPulseFullscreen 1.2s ease-in-out infinite;
 }
 
-@keyframes timerPulse {
-  0%, 100% { transform: translateX(-50%) scale(1); opacity: 1; }
-  50% { transform: translateX(-50%) scale(1.08); opacity: 0.7; }
+.timer-overlay.timer-fullscreen.timer-ended .timer-value {
+  color: var(--accent-error);
+  text-shadow: 0 0 60px rgba(255, 69, 58, 0.4);
+}
+
+.timer-overlay.timer-pill.timer-ended {
+  animation: timerPulsePill 1.2s ease-in-out infinite;
+  border-color: var(--accent-error);
+}
+
+.timer-overlay.timer-pill.timer-ended .timer-value {
+  color: var(--accent-error);
+}
+
+@keyframes timerPulseFullscreen {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+
+@keyframes timerPulsePill {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.05); }
 }
 
 /* ============================================================
@@ -1215,7 +1982,7 @@ h1, h2, h3, h4, h5, h6 {
    Écran d'attente Playlist intercalé (Lot 5)
    ============================================================ */
 .kiosk-playlist-waiting {
-  background: radial-gradient(circle at center, #0f0f15 0%, #020205 100%);
+  background: radial-gradient(circle at center, color-mix(in srgb, var(--bg-main) 92%, #fff) 0%, color-mix(in srgb, var(--bg-main) 82%, #000) 100%);
 }
 
 .kiosk-playlist-info {
@@ -1272,6 +2039,23 @@ h1, h2, h3, h4, h5, h6 {
   height: 100%;
 }
 
+/* Bascule vidéo/audio en haut du panneau gauche (réf. correctif "il manque
+   l'onglet pour faire des playlists de musiques") : réutilise .speed-btn
+   (déjà utilisé pour les onglets Cours/Playlists audio du mode coach)
+   plutôt qu'un nouveau composant d'onglet. */
+.playlists-type-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.playlists-type-tabs .speed-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+
 .playlists-right-panel {
   flex: 2;
   display: flex;
@@ -1315,7 +2099,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .playlist-card.active {
   border-color: var(--accent-primary);
-  background: rgba(228, 0, 43, 0.04);
+  background: color-mix(in srgb, var(--accent-primary) 4%, transparent);
 }
 
 .playlist-card-header {
@@ -1400,7 +2184,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .drag-drop-zone.drag-over {
   border-color: var(--accent-primary);
-  background: rgba(228, 0, 43, 0.05);
+  background: color-mix(in srgb, var(--accent-primary) 5%, transparent);
 }
 
 .playlist-drag-item {
@@ -1536,6 +2320,23 @@ h1, h2, h3, h4, h5, h6 {
   text-transform: capitalize;
 }
 
+/* Planning sur téléphone (réf. mission "Double Planning", màj mobile) : la
+   barre d'outils (onglets canal, navigation semaine, bascule vue, bouton
+   création) ne tient pas sur une largeur de téléphone en une seule ligne
+   malgré le flex-wrap du conteneur — chaque groupe doit lui-même pouvoir
+   passer à la ligne et l'étiquette de semaine ne doit plus forcer 220px. */
+@media (max-width: 900px) {
+  .week-nav {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .week-nav-label {
+    min-width: 0;
+    width: 100%;
+    order: -1;
+  }
+}
+
 .schedule-body {
   flex: 1;
   min-height: 0;
@@ -1606,7 +2407,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .schedule-day-body.drag-over {
-  background: rgba(228, 0, 43, 0.05);
+  background: color-mix(in srgb, var(--accent-primary) 5%, transparent);
   outline: 2px dashed var(--accent-primary);
   outline-offset: -2px;
 }
@@ -1741,61 +2542,141 @@ h1, h2, h3, h4, h5, h6 {
    Mode audio coach — écran kiosk (Lot 8, réf. F10.5/UX2.13)
    ============================================================ */
 .kiosk-coach-mode {
-  background: radial-gradient(circle at center, #101014 0%, #020203 100%);
+  background: var(--bg-main);
 }
 
-.coach-habillage {
+/* Fond d'ambiance actif sous le mode coach (réf. mission "afficher un fond
+   depuis le mode coach") : la couche devient un simple voile sombre pour
+   laisser voir le fond (animé ou figé) rendu par la couche inférieure, tout
+   en gardant le texte lisible. Sans cette règle le fond était totalement
+   masqué par le background opaque ci-dessus. */
+.kiosk-coach-mode.with-background {
+  background: color-mix(in srgb, var(--bg-main) 45%, transparent);
+}
+
+/* Scène plein écran (correctif "carré rouge minuscule") : l'ancien
+   habillage était une petite carte bordée, perdue au centre d'un immense
+   fond noir. Remplacé par une mise en page immersive occupant tout l'écran,
+   avec une lueur radiale douce à la couleur du programme derrière le texte
+   plutôt qu'un encadré — sans backdrop-filter (coût GPU, réf. correctif
+   fluidité cinéma). */
+.coach-stage {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 48px 64px;
-  border: 1px solid;
-  border-radius: var(--radius-lg);
-  background: rgba(10, 10, 10, 0.5);
-  backdrop-filter: blur(6px);
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  gap: 14px;
+  padding: 6vh 8vw;
+  text-align: center;
 }
 
-.coach-course-title {
+.coach-stage-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 70% 55% at 50% 45%, color-mix(in srgb, var(--coach-accent) 22%, transparent) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.coach-stage-eyebrow {
+  position: relative;
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 0.4em;
+  color: var(--coach-accent);
+}
+
+.coach-stage-course {
+  position: relative;
   font-family: var(--font-title);
-  font-size: 2rem;
+  font-size: clamp(1.8rem, 4vh, 3rem);
   font-weight: 900;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
+  color: var(--text-main);
 }
 
-.coach-track-label {
-  font-size: 1.1rem;
+.coach-stage-track-label {
+  position: relative;
+  font-size: 1.15rem;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.2em;
   font-weight: 700;
-  margin-top: 12px;
+  margin-top: 18px;
 }
 
-.coach-track-title {
+.coach-stage-track-title {
+  position: relative;
   font-family: var(--font-title);
-  font-size: 4.5rem;
+  font-size: clamp(3rem, 9vh, 7.5rem);
   font-weight: 900;
   color: var(--text-main);
-  text-align: center;
-  line-height: 1.1;
+  line-height: 1.05;
+  margin: 6px 0 0;
+  max-width: 90vw;
+  text-shadow: 0 0 60px color-mix(in srgb, var(--coach-accent) 35%, transparent);
 }
 
-.coach-track-remaining {
-  font-size: 2rem;
-  font-weight: 700;
-  color: var(--text-main);
+.coach-stage-progress-track {
+  position: relative;
+  width: min(56vw, 720px);
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-main) 14%, transparent);
+  overflow: hidden;
+  margin-top: 5vh;
+}
+
+.coach-stage-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--coach-accent);
+  transition: width 0.15s linear;
+}
+
+.coach-stage-meta-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-top: 14px;
   font-variant-numeric: tabular-nums;
 }
 
-.coach-paused-badge {
-  margin-top: 8px;
+.coach-stage-time {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+/* Couleur du thème/programme (--coach-accent, réf. correctif "élément Pause
+   hors thème sur l'écran câblé en mode coach") plutôt que --accent-warning :
+   ce dernier ne varie JAMAIS d'un thème à l'autre (couleur sémantique
+   "avertissement" fixe partout dans l'app), donc ce badge restait orange
+   quel que soit le thème choisi ou le programme en cours — contrairement à
+   tout le reste de la scène coach (eyebrow, lueur, barre de progression),
+   qui suit déjà --coach-accent. */
+.coach-stage-paused-badge {
   font-family: var(--font-title);
-  font-size: 1.5rem;
+  font-size: 1.1rem;
   font-weight: 900;
-  letter-spacing: 0.3em;
-  color: var(--accent-warning);
+  letter-spacing: 0.25em;
+  color: var(--coach-accent);
+  padding: 4px 16px;
+  border: 1px solid var(--coach-accent);
+  border-radius: 999px;
+}
+
+.coach-stage-next-hint {
+  position: relative;
+  margin-top: 20px;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
 }
 
 /* ============================================================
@@ -1817,6 +2698,13 @@ h1, h2, h3, h4, h5, h6 {
   gap: 20px;
 }
 
+.coach-picker-topbar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .coach-picker-header {
   display: flex;
   flex-direction: column;
@@ -1834,6 +2722,16 @@ h1, h2, h3, h4, h5, h6 {
 
 .coach-picker-search {
   width: 100%;
+}
+
+/* Onglet Cours isolés / Playlists audio (réf. mission "éditions mixées") */
+.coach-picker-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.coach-picker-tabs .speed-btn {
+  flex: 1;
 }
 
 .coach-picker-list {
@@ -1871,6 +2769,12 @@ h1, h2, h3, h4, h5, h6 {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  flex: 1;
+}
+
+.coach-course-item .material-symbols-outlined {
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .coach-course-item-title {
@@ -1919,6 +2823,27 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+/* Bouton "Désactiver le mode coach" (réf. correctif "le cours coach s'arrête
+   si on quitte la page par mégarde") : seule action qui arrête réellement le
+   cours, volontairement discrète et éloignée du geste de retour, avec un
+   libellé explicite plutôt qu'une icône ambiguë en haut de l'écran. */
+.coach-disable-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 48px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: 1px solid var(--accent-error);
+  color: var(--accent-error);
+  font-size: 0.85rem;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -1985,7 +2910,7 @@ h1, h2, h3, h4, h5, h6 {
   min-width: 96px;
   border-radius: 50%;
   font-size: 2.2rem;
-  color: #fff;
+  color: var(--accent-primary-fg);
   border: none;
 }
 
@@ -2039,13 +2964,18 @@ h1, h2, h3, h4, h5, h6 {
   cursor: pointer;
 }
 
-.coach-sheet-overlay {
+.coach-sheet-overlay { /* voile thème, plus de noir fixe */
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: color-mix(in srgb, var(--bg-main) 62%, transparent);
   z-index: 200;
   display: flex;
   align-items: flex-end;
+}
+
+@keyframes olcSheetUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
 }
 
 .coach-sheet {
@@ -2057,7 +2987,10 @@ h1, h2, h3, h4, h5, h6 {
   padding: 12px 20px 24px;
   display: flex;
   flex-direction: column;
-  animation: slideInRight var(--transition-normal);
+  /* Un panneau qui glisse depuis le BAS (réf. mission UI/UX — auparavant
+     `slideInRight`, un glissement horizontal incohérent pour une feuille
+     ancrée en bas d'écran). */
+  animation: olcSheetUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .coach-sheet-handle {
@@ -2111,15 +3044,25 @@ h1, h2, h3, h4, h5, h6 {
   background: var(--bg-main);
 }
 
+/* Grille 3 colonnes plutôt que flex + transform de centrage (réf. correctif
+   "logo mobile minuscule et mal placé") : burger et point de statut occupent
+   leur colonne naturelle (auto), le logo (lockup large, ratio ~2,45:1) est
+   centré dans la colonne du milieu SANS position absolue ni transform, qui
+   provoquaient un rendu visuel décorrélé de son rectangle réel mesuré
+   (DevTools cohérent, capture d'écran non conforme) sur ce moteur de rendu. */
 .mobile-topbar {
-  height: 52px;
+  height: 56px;
   flex-shrink: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  justify-content: space-between;
   padding: 0 12px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-surface);
+}
+
+.mobile-topbar-logo {
+  justify-self: center;
 }
 
 .mobile-burger-btn {
@@ -2136,13 +3079,6 @@ h1, h2, h3, h4, h5, h6 {
   cursor: pointer;
 }
 
-.mobile-topbar-brand {
-  font-family: var(--font-title);
-  font-size: 0.95rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-}
-
 .mobile-page-content {
   flex: 1;
   min-height: 0;
@@ -2154,7 +3090,7 @@ h1, h2, h3, h4, h5, h6 {
 .mobile-drawer-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: color-mix(in srgb, var(--bg-main) 62%, transparent);
   z-index: 300;
 }
 
@@ -2185,14 +3121,7 @@ h1, h2, h3, h4, h5, h6 {
   min-height: 48px;
 }
 
-/* Contre la règle @media(max-width:900px) plus haut qui masque les libellés
-   et fait perdre toute contrainte de taille aux icônes SVG (censée ne
-   s'appliquer qu'à la sidebar PC réduite en mode icônes, pas au tiroir
-   mobile où les libellés doivent au contraire rester visibles). Sélecteur
-   volontairement plus spécifique pour l'emporter sans !important. */
-.mobile-drawer-nav .nav-link svg {
-  width: 20px;
-  height: 20px;
+.mobile-drawer-nav .nav-link .material-symbols-outlined {
   flex-shrink: 0;
 }
 
@@ -2229,6 +3158,29 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+/* Nom de playlist + "à suivre" (réf. audit plan-corrections-bugs, point 2b) */
+.mobile-remote-playlist-badge {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-primary) 3%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 15%, transparent);
+}
+
+.mobile-remote-playlist-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+}
+
+.mobile-remote-playlist-next {
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 
 .mobile-remote-thumb {
@@ -2274,17 +3226,19 @@ h1, h2, h3, h4, h5, h6 {
   margin-top: auto;
 }
 
+/* Couleur du thème plutôt qu'un rouge fixe (réf. correctif "couleurs
+   hardcodées associées à un cours" — le thème prime désormais). */
 .mobile-remote-stop {
   width: 100%;
   max-width: 360px;
   font-size: 0.95rem;
-  color: var(--accent-error);
+  color: var(--accent-primary);
   transition: background var(--transition-fast);
 }
 
 .mobile-remote-stop.holding {
-  background: rgba(255, 69, 58, 0.25);
-  border-color: var(--accent-error);
+  background: color-mix(in srgb, var(--accent-primary) 25%, transparent);
+  border-color: var(--accent-primary);
 }
 
 .mobile-remote-quick-row {
@@ -2302,3 +3256,966 @@ h1, h2, h3, h4, h5, h6 {
   justify-content: center;
 }
 
+/* ============================================================
+   Éditeur de canvas (Lot 12, réf. UX2.2) — PC uniquement, pas de
+   déclinaison mobile (édition fine au doigt hors périmètre v1).
+   ============================================================ */
+.canvas-editor-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.canvas-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.canvas-editor-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.canvas-editor-unsaved {
+  font-size: 0.8rem;
+  color: var(--accent-warning);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.canvas-editor-body {
+  display: grid;
+  grid-template-columns: 260px 1fr 300px;
+  gap: 20px;
+  align-items: start;
+}
+
+.canvas-editor-sidebar {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.canvas-editor-sidebar h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.canvas-editor-layout-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.canvas-editor-layout-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.canvas-editor-layout-item:hover {
+  background: var(--bg-surface-hover);
+}
+
+.canvas-editor-layout-item.selected {
+  border-color: var(--accent-primary);
+}
+
+.canvas-editor-active-badge {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 800;
+  color: var(--accent-success);
+}
+
+.canvas-editor-new-form,
+.canvas-editor-name-row {
+  display: flex;
+  gap: 8px;
+}
+
+.canvas-editor-new-form .form-control,
+.canvas-editor-name-row .form-control {
+  flex: 1;
+}
+
+.canvas-editor-stage-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.canvas-editor-stage-wrapper h3 {
+  align-self: flex-start;
+  margin: 0;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.canvas-editor-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--bg-main);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  /* Même contexte de container query que .kiosk-root, pour que le texte des
+     éléments (dimensionné en cqh) ait la même taille RELATIVE ici que sur
+     l'écran cinéma réel malgré la boîte bien plus petite. */
+  container-type: size;
+}
+
+.canvas-editor-stage.dragging {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 2% 2%;
+}
+
+.canvas-editor-element {
+  position: absolute;
+  cursor: grab;
+  outline: 1px dashed rgba(255, 255, 255, 0.15);
+}
+
+.canvas-editor-element:active {
+  cursor: grabbing;
+}
+
+.canvas-editor-element.selected {
+  outline: 2px solid var(--accent-primary);
+}
+
+.canvas-editor-element.hidden-element {
+  opacity: 0.35;
+}
+
+.canvas-editor-resize-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--accent-primary);
+  cursor: nwse-resize;
+  border: 2px solid var(--bg-main);
+}
+
+.canvas-editor-grid-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.canvas-editor-palette {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.canvas-editor-palette-btn {
+  font-size: 0.8rem;
+  min-height: 44px;
+}
+
+.canvas-editor-properties {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.canvas-editor-el-type-label {
+  font-weight: 800;
+  color: var(--accent-primary);
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+}
+
+.canvas-editor-num-pair {
+  display: flex;
+  gap: 8px;
+}
+
+.canvas-editor-swatches {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.canvas-editor-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--border-color);
+  cursor: pointer;
+}
+
+.canvas-editor-swatch.selected {
+  border-color: var(--text-main);
+}
+
+.canvas-editor-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.canvas-editor-layer-row {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 1100px) {
+  .canvas-editor-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* ==========================================================================
+   Interface cinéma adhérents — /cinema (mission "sortie cinéma autonome").
+   Style "Apple TV" : rangées par programme, cartes 16:9, navigation souris.
+   ========================================================================== */
+
+.cinema-root {
+  /* Suit le thème choisi dans l'admin (data-theme sur <html>), comme le
+     reste de l'application (correctif "le thème ne se synchronise pas avec
+     l'écran cinéma") — pas de variables forcées ici. */
+  position: fixed;
+  inset: 0;
+  background: var(--bg-main);
+  color: var(--text-main);
+  overflow: hidden;
+  cursor: default;
+}
+
+.cinema-layer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.cinema-layer.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cinema-grid-layer {
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+}
+
+/* Entrée en scène des sections et cartes (delay échelonné via style inline) */
+@keyframes cinema-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* .cinema-brand est une image (logo, réf. mission "remplace le logo") : plus
+   de styles typographiques à porter ici. */
+.cinema-brand {
+  margin-bottom: 4px;
+}
+
+/* --- Héros "À la une" (mise en page verticale façon Netflix) --- */
+.cinema-hero {
+  position: relative;
+  min-height: 52vh;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  animation: cinema-fade-up 0.5s ease both;
+}
+
+.cinema-hero-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(1.05);
+  transform: scale(1.03);
+}
+
+.cinema-hero-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to top, var(--bg-main) 4%, transparent 55%),
+    linear-gradient(to right, color-mix(in srgb, var(--bg-main) 88%, transparent) 0%, transparent 65%);
+}
+
+.cinema-hero-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 48px 64px 42px;
+  max-width: 720px;
+}
+
+/* Fond = accent du THÈME actif (réf. mission "intégrer au thème") : change
+   avec le thème choisi, plutôt que la couleur fixe du programme du cours. */
+.cinema-hero-badge {
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-primary-fg);
+  background: var(--accent-primary);
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+
+.cinema-hero-title {
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  font-weight: 800;
+  line-height: 1.05;
+  margin: 0;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.35);
+}
+
+/* Pastille de fond (réf. mission "intégrer au thème") : détache le texte du
+   fond vidéo/image derrière le héros, avec une teinte de surface qui suit le
+   thème plutôt que du texte nu. display:inline-flex pour que la pastille ne
+   dépasse pas la largeur du contenu (c'est un <p>, bloc par défaut). */
+.cinema-hero-meta {
+  display: inline-flex;
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  margin: 0;
+  background: color-mix(in srgb, var(--bg-surface-elevated) 88%, transparent);
+  padding: 5px 14px;
+  border-radius: 999px;
+}
+
+.cinema-hero-play {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  border: none;
+  border-radius: 999px;
+  padding: 14px 28px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--accent-primary-fg);
+  background: var(--accent-primary);
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  box-shadow: 0 8px 26px color-mix(in srgb, var(--accent-primary) 45%, transparent);
+}
+
+.cinema-hero-play:hover,
+.cinema-hero-play:focus-visible {
+  transform: translateY(-2px) scale(1.04);
+  filter: brightness(1.08);
+  outline: none;
+}
+
+/* --- Corps vertical : rangées par programme puis grille complète --- */
+.cinema-sections {
+  padding: 26px 64px 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+.cinema-subtitle {
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  margin: 0;
+}
+
+.cinema-empty {
+  color: var(--text-muted);
+  font-size: 1.2rem;
+}
+
+.cinema-row {
+  animation: cinema-fade-up 0.5s ease both;
+}
+
+.cinema-row-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+/* Pastille de fond (réf. mission "intégrer au thème") : le titre de rangée
+   ("RPM", "Sprint"...) reposait sur du texte nu — une teinte de surface qui
+   suit le thème le détache mieux du fond de page. */
+.cinema-row-header h2 {
+  font-size: 1.3rem;
+  font-weight: 800;
+  margin: 0;
+  letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--bg-surface-elevated) 88%, transparent);
+  padding: 4px 14px;
+  border-radius: 999px;
+}
+
+.cinema-row-count {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* Conteneur des flèches gauche/droite + rangée défilante (réf. mission
+   cinéma, point 2) : remplace la barre de défilement native par des
+   chevrons, dans l'esprit Netflix. */
+.cinema-row-wrap {
+  position: relative;
+}
+
+.cinema-row-scroll {
+  display: flex;
+  gap: 18px;
+  overflow-x: auto;
+  padding: 6px 4px 16px;
+  /* Barre de défilement native masquée : les flèches ci-dessous en sont le
+     remplacement principal ; le geste tactile/trackpad reste disponible. */
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+}
+
+.cinema-row-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.cinema-row-arrow {
+  position: absolute;
+  top: 0;
+  bottom: 16px;
+  width: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  z-index: 1;
+  /* Le dégradé de fond s'estompe vers var(--bg-main) (voir ci-dessous) : un
+     blanc fixe devenait invisible sur les thèmes clairs (réf. correctif
+     "boutons cinéma hors thème"). */
+  color: var(--text-main);
+  transition: background 0.15s ease;
+}
+
+.cinema-row-arrow-left {
+  left: 0;
+  background: linear-gradient(to right, var(--bg-main) 15%, transparent);
+}
+
+.cinema-row-arrow-right {
+  right: 0;
+  background: linear-gradient(to left, var(--bg-main) 15%, transparent);
+}
+
+.cinema-row-arrow:hover {
+  filter: brightness(1.3);
+}
+
+.cinema-card {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  animation: cinema-fade-up 0.45s ease both;
+}
+
+.cinema-card:hover,
+.cinema-card:focus-visible {
+  transform: translateY(-4px) scale(1.05);
+  outline: none;
+}
+
+.cinema-card-thumb {
+  position: relative;
+  width: 300px;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-surface-elevated);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+  border: 2px solid transparent;
+  transition: border-color 0.18s ease, box-shadow 0.22s ease;
+}
+
+.cinema-card:hover .cinema-card-thumb {
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+}
+
+.cinema-card-duration {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  background: color-mix(in srgb, var(--bg-main) 80%, transparent);
+  color: var(--text-main);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.cinema-card:hover .cinema-card-thumb,
+.cinema-card:focus-visible .cinema-card-thumb {
+  border-color: var(--accent-primary);
+}
+
+.cinema-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cinema-card-thumb-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cinema-card-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-main);
+  background: color-mix(in srgb, var(--bg-main) 55%, transparent);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.cinema-card:hover .cinema-card-play,
+.cinema-card:focus-visible .cinema-card-play {
+  opacity: 1;
+}
+
+.cinema-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cinema-card-meta {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* --- Grille complète "Tous les cours" (mise en page liste verticale) --- */
+.cinema-all h2 {
+  font-size: 1.3rem;
+  font-weight: 800;
+  margin: 0 0 14px;
+}
+
+.cinema-all-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+}
+
+.cinema-all-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--bg-surface);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 10px 14px 10px 10px;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  animation: cinema-fade-up 0.4s ease both;
+}
+
+.cinema-all-item:hover,
+.cinema-all-item:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--accent-primary);
+  background: var(--bg-surface-hover);
+  outline: none;
+}
+
+.cinema-all-thumb {
+  flex: 0 0 96px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-surface-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cinema-all-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cinema-all-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cinema-all-title {
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cinema-all-meta {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+/* --- Fin de cours : "À suivre" avec autoplay annulable (réf. mission) --- */
+.cinema-upnext {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-main);
+}
+
+.cinema-upnext-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 560px;
+  padding: 24px;
+  text-align: center;
+  animation: cinema-fade-up 0.5s ease both;
+}
+
+.cinema-upnext-label {
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--upnext-accent, var(--accent-primary));
+}
+
+.cinema-upnext-thumb {
+  position: relative;
+  width: min(480px, 78vw);
+  aspect-ratio: 16 / 9;
+  border-radius: 16px;
+  overflow: hidden;
+  border: none;
+  padding: 0;
+  background: var(--bg-surface-elevated);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  transition: transform 0.2s ease;
+}
+
+.cinema-upnext-thumb:hover,
+.cinema-upnext-thumb:focus-visible {
+  transform: scale(1.02);
+  outline: none;
+}
+
+.cinema-upnext-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Anneau de progression de l'autoplay : conic-gradient piloté en inline. */
+.cinema-upnext-ring {
+  position: relative;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.9s linear;
+}
+
+.cinema-upnext-ring-inner {
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg-main) 70%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cinema-upnext-title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  margin: 6px 0 0;
+}
+
+.cinema-upnext-meta {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.cinema-upnext-autoplay {
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.cinema-upnext-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+/* Boutons sur fond potentiellement clair : garde le style translucide lisible */
+.cinema-upnext-actions .cinema-ctl-btn {
+  background: var(--bg-surface-elevated);
+  border-color: transparent;
+  color: var(--text-main);
+}
+
+.cinema-upnext-actions .cinema-ctl-btn:hover {
+  background: var(--bg-surface-hover);
+}
+
+/* Compte à rebours avant lancement (même esprit que le kiosk) */
+.cinema-countdown {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: var(--bg-main);
+}
+
+/* Lecture vidéo plein écran + barre de contrôle souris auto-masquée */
+.cinema-video-layer {
+  background: #000;
+}
+
+.cinema-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+/* Bouton de lancement manuel (autoplay refusé par le navigateur, ex. mobile
+   hors kiosk Chromium) : la lecture reste locale à chaque appareil, donc
+   soumise aux règles d'autoplay habituelles de ce navigateur. */
+.cinema-tap-to-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--bg-main) 60%, transparent);
+  border: none;
+  color: var(--text-main);
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cinema-controls {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 28px 36px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--bg-main) 70%, transparent), transparent 30%, transparent 65%, color-mix(in srgb, var(--bg-main) 80%, transparent));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.cinema-controls.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cinema-controls-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.cinema-now-playing {
+  font-size: 1.15rem;
+  font-weight: 700;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+}
+
+.cinema-controls-bottom {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.cinema-ctl-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: color-mix(in srgb, var(--bg-main) 65%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-main) 22%, transparent);
+  color: var(--text-main);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.cinema-ctl-btn:hover {
+  background: color-mix(in srgb, var(--text-main) 20%, transparent);
+}
+
+.cinema-ctl-round {
+  padding: 12px;
+  border-radius: 50%;
+}
+
+.cinema-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-main);
+  font-size: 0.95rem;
+  text-shadow: 0 1px 4px color-mix(in srgb, var(--bg-main) 85%, transparent);
+}
+
+.cinema-seek {
+  flex: 1;
+  height: 6px;
+  cursor: pointer;
+}
+
+/* Switch de sortie câblée kiosk/cinéma (dashboard + télécommande mobile) */
+.display-output-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.display-output-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.display-output-buttons {
+  display: flex;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 999px;
+  padding: 3px;
+  gap: 3px;
+}
+
+.display-output-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.display-output-btn.active {
+  background: var(--accent-primary);
+  color: var(--accent-primary-fg);
+}
+
+.display-output-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mobile-remote-output {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 0;
+}

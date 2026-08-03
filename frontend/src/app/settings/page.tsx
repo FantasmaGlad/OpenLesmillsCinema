@@ -1,14 +1,13 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useAppSettings, type Theme } from "@/lib/AppSettingsContext";
+import type { Language } from "@/lib/i18n";
 
 interface SettingsData {
-  countdown_seconds: number;
   wait_time_between_courses: number;
   volume_default: number;
   audio_chain_timer_seconds: number;
-  theme: string;
-  language: string;
   paths: Record<string, string>;
 }
 
@@ -19,27 +18,47 @@ interface ToastState {
 
 function getApiUrl(path: string) {
   if (typeof window !== "undefined" && window.location.port === "3000") {
-    return `http://localhost:8000/api${path}`;
+    return `http://localhost:8001/api${path}`;
   }
   return `/api${path}`;
 }
 
-const PATH_LABELS: Record<string, string> = {
-  database_url: "Base de données",
-  media_dir: "Vidéos",
-  watch_dir: "Dossier surveillé (vidéos)",
-  thumbnails_dir: "Miniatures",
-  backgrounds_dir: "Fonds animés",
-  backgrounds_watch_dir: "Dossier surveillé (fonds animés)",
-  audio_dir: "Cours audio",
-  audio_watch_dir: "Dossier surveillé (cours audio)",
+// Aperçu à 4 couleurs par thème (réf. mission "thèmes cinéma") : mêmes
+// valeurs que les blocs :root[data-theme="..."] de globals.css, pour que la
+// vignette reflète fidèlement le thème réellement appliqué.
+const THEME_SWATCHES: { value: Theme; labelKey: string; colors: [string, string, string, string] }[] = [
+  { value: "les-mills-sombre", labelKey: "settingsPage.themeDark", colors: ["#0a0a0a", "#1e1e20", "#e4002b", "#ffffff"] },
+  { value: "clair", labelKey: "settingsPage.themeLight", colors: ["#f4f4f5", "#ffffff", "#e4002b", "#16161a"] },
+  { value: "lune", labelKey: "settingsPage.themeLune", colors: ["#cccccc", "#a3a3cc", "#5c5c99", "#292966"] },
+  { value: "menthe", labelKey: "settingsPage.themeMenthe", colors: ["#98fbcb", "#bfffed", "#7fcfa8", "#558b71"] },
+  { value: "automne", labelKey: "settingsPage.themeAutomne", colors: ["#ffb343", "#db9a39", "#b37e2e", "#614419"] },
+  { value: "hiver", labelKey: "settingsPage.themeHiver", colors: ["#b8e3e9", "#93b1b5", "#4f7c82", "#0b2e33"] },
+  { value: "chili", labelKey: "settingsPage.themeChili", colors: ["#cd1c18", "#ffa896", "#9b1313", "#38000a"] },
+  { value: "ciel", labelKey: "settingsPage.themeCiel", colors: ["#b3ebf2", "#77cbda", "#4a9dae", "#2e6c7b"] },
+  { value: "orchidee", labelKey: "settingsPage.themeOrchidee", colors: ["#ed80e9", "#c96dc6", "#784176", "#4f2b4e"] },
+  { value: "taupe", labelKey: "settingsPage.themeTaupe", colors: ["#fcd3ae", "#ab8f76", "#826d5a", "#54463a"] },
+  { value: "charbon", labelKey: "settingsPage.themeCharbon", colors: ["#f2f2f2", "#a1a1a1", "#4a4a4a", "#1a1a1a"] },
+];
+
+const PATH_LABEL_KEYS: Record<string, string> = {
+  database_url: "settingsPage.paths.database_url",
+  media_dir: "settingsPage.paths.media_dir",
+  watch_dir: "settingsPage.paths.watch_dir",
+  thumbnails_dir: "settingsPage.paths.thumbnails_dir",
+  backgrounds_dir: "settingsPage.paths.backgrounds_dir",
+  backgrounds_watch_dir: "settingsPage.paths.backgrounds_watch_dir",
+  audio_dir: "settingsPage.paths.audio_dir",
+  audio_watch_dir: "settingsPage.paths.audio_watch_dir",
 };
 
 export default function SettingsPage() {
+  const { theme, language, setTheme, setLanguage, t } = useAppSettings();
   const [data, setData] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const showToast = (message: string, type: ToastState["type"] = "success") => setToast({ message, type });
 
@@ -66,34 +85,49 @@ export default function SettingsPage() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          countdown_seconds: data.countdown_seconds,
           wait_time_between_courses: data.wait_time_between_courses,
           volume_default: data.volume_default,
           audio_chain_timer_seconds: data.audio_chain_timer_seconds,
-          theme: data.theme,
-          language: data.language,
         }),
       });
       if (res.ok) {
         setData(await res.json());
-        showToast("Paramètres enregistrés — appliqués immédiatement");
+        showToast(t("settingsPage.savedToast"));
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || "Erreur lors de la sauvegarde", "error");
+        showToast(err.detail || t("settingsPage.saveError"), "error");
       }
     } catch {
-      showToast("Erreur réseau lors de la sauvegarde", "error");
+      showToast(t("common.networkError"), "error");
     } finally {
       setSaving(false);
     }
   };
 
+  const handleFullReset = async () => {
+    setResetting(true);
+    try {
+      const res = await fetch(getApiUrl("/settings/system/reset"), { method: "POST" });
+      if (res.ok) {
+        showToast(t("settingsPage.syncResetSuccess"));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || t("settingsPage.syncResetError"), "error");
+      }
+    } catch {
+      showToast(t("common.networkError"), "error");
+    } finally {
+      setResetting(false);
+      setShowResetConfirm(false);
+    }
+  };
+
   if (loading) {
-    return <div className="live-empty">Chargement des paramètres...</div>;
+    return <div className="live-empty">{t("common.loading")}</div>;
   }
 
   if (!data) {
-    return <div className="live-empty">Impossible de charger les paramètres.</div>;
+    return <div className="live-empty">{t("settingsPage.loadError")}</div>;
   }
 
   return (
@@ -105,44 +139,49 @@ export default function SettingsPage() {
       )}
 
       <form className="live-block" onSubmit={handleSave} style={{ gap: "20px" }}>
-        <h3>Lecture & habillage</h3>
+        <h3>{t("settingsPage.playbackSection")}</h3>
 
         <div className="form-group">
-          <label className="form-label">Thème</label>
-          <select className="form-control" value={data.theme} onChange={(e) => setData({ ...data, theme: e.target.value })}>
-            <option value="les-mills-sombre">Les Mills sombre (défaut)</option>
-            <option value="clair">Clair</option>
-          </select>
+          <label className="form-label">{t("settingsPage.themeLabel")}</label>
+          <div className="theme-picker-grid">
+            {THEME_SWATCHES.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`theme-picker-card ${theme === option.value ? "active" : ""}`}
+                onClick={() => setTheme(option.value)}
+              >
+                <div className="theme-picker-swatch">
+                  {option.colors.map((c, i) => (
+                    <span key={i} style={{ background: c }} />
+                  ))}
+                </div>
+                <span className="theme-picker-name">{t(option.labelKey)}</span>
+              </button>
+            ))}
+          </div>
           <p style={{ fontSize: "0.75rem", color: "var(--text-dim)", margin: "4px 0 0" }}>
-            Persisté ici ; l&apos;application visuelle multi-thème arrive au Lot 11.
+            {t("settingsPage.themeHint")}
           </p>
         </div>
 
         <div className="form-group">
-          <label className="form-label">Langue</label>
-          <select className="form-control" value={data.language} onChange={(e) => setData({ ...data, language: e.target.value })}>
-            <option value="fr">Français</option>
-            <option value="en">English</option>
-          </select>
-          <p style={{ fontSize: "0.75rem", color: "var(--text-dim)", margin: "4px 0 0" }}>
-            Persisté ici ; la traduction complète de l&apos;interface arrive au Lot 11.
-          </p>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Durée du compte à rebours de lancement (secondes, 0 = désactivé)</label>
-          <input
-            type="number"
-            min={0}
-            max={10}
+          <label className="form-label">{t("settingsPage.languageLabel")}</label>
+          <select
             className="form-control"
-            value={data.countdown_seconds}
-            onChange={(e) => setData({ ...data, countdown_seconds: Number(e.target.value) })}
-          />
+            value={language}
+            onChange={(e) => setLanguage(e.target.value as Language)}
+          >
+            <option value="fr">{t("settingsPage.languageFr")}</option>
+            <option value="en">{t("settingsPage.languageEn")}</option>
+          </select>
+          <p style={{ fontSize: "0.75rem", color: "var(--text-dim)", margin: "4px 0 0" }}>
+            {t("settingsPage.languageHint")}
+          </p>
         </div>
 
         <div className="form-group">
-          <label className="form-label">Durée d&apos;attente entre les cours d&apos;une playlist (secondes)</label>
+          <label className="form-label">{t("settingsPage.waitTimeLabel")}</label>
           <input
             type="number"
             min={0}
@@ -153,7 +192,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Volume par défaut (%)</label>
+          <label className="form-label">{t("settingsPage.volumeLabel")}</label>
           <input
             type="number"
             min={0}
@@ -165,7 +204,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Minuterie par défaut entre pistes en mode coach « auto + minuterie » (secondes)</label>
+          <label className="form-label">{t("settingsPage.chainTimerLabel")}</label>
           <input
             type="number"
             min={1}
@@ -176,24 +215,61 @@ export default function SettingsPage() {
         </div>
 
         <button type="submit" className="btn btn-primary" style={{ height: "48px" }} disabled={saving}>
-          {saving ? "Enregistrement..." : "Enregistrer"}
+          {saving ? t("common.saving") : t("common.save")}
         </button>
       </form>
 
       <div className="live-block">
-        <h3>Éditeur de canvas</h3>
-        <p className="live-empty">
-          L&apos;édition des compositions d&apos;attente et de pause arrive au Lot 12. La composition par défaut
-          actuellement affichée sur l&apos;écran cinéma est fixe (Lot 4).
-        </p>
+        <h3>{t("settingsPage.syncSection")}</h3>
+        <p className="live-empty">{t("settingsPage.syncHint")}</p>
+        <button
+          type="button"
+          className="btn btn-primary"
+          style={{ height: "48px", backgroundColor: "var(--accent-error)" }}
+          onClick={() => setShowResetConfirm(true)}
+        >
+          {t("settingsPage.syncResetButton")}
+        </button>
       </div>
 
+      {showResetConfirm && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
+              {t("settingsPage.syncResetButton")}
+            </h3>
+            <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
+              {t("settingsPage.syncResetConfirm")}
+            </p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowResetConfirm(false)}
+                disabled={resetting}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ backgroundColor: "var(--accent-error)" }}
+                onClick={handleFullReset}
+                disabled={resetting}
+              >
+                {resetting ? t("settingsPage.syncResetInProgress") : t("settingsPage.syncResetButton")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="live-block">
-        <h3>Chemins (lecture seule)</h3>
+        <h3>{t("settingsPage.pathsSection")}</h3>
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {Object.entries(data.paths).map(([key, value]) => (
             <div key={key} style={{ display: "flex", justifyContent: "space-between", gap: "16px", fontSize: "0.85rem" }}>
-              <span style={{ color: "var(--text-muted)" }}>{PATH_LABELS[key] || key}</span>
+              <span style={{ color: "var(--text-muted)" }}>{t(PATH_LABEL_KEYS[key] || key)}</span>
               <span style={{ color: "var(--text-main)", fontFamily: "monospace", textAlign: "right", wordBreak: "break-all" }}>
                 {value}
               </span>

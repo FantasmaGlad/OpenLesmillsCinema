@@ -2,6 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { useAppSettings } from "@/lib/AppSettingsContext";
+import type { Language } from "@/lib/i18n";
+import Icon from "@/components/Icon";
 
 type TargetType = "video" | "playlist";
 type ScheduleTypeValue = "once" | "recurring";
@@ -54,18 +57,9 @@ interface ToastState {
   type: "success" | "error" | "warning";
 }
 
-const DAY_LABELS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
-const DAY_LABELS_FULL = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
-
-const PROGRAM_ACCENT: Record<string, string> = {
-  RPM: "var(--accent-rpm)",
-  Sprint: "var(--accent-sprint)",
-  "The Trip": "var(--accent-trip)",
-};
-
 function getApiUrl(path: string) {
   if (typeof window !== "undefined" && window.location.port === "3000") {
-    return `http://localhost:8000/api${path}`;
+    return `http://localhost:8001/api${path}`;
   }
   return `/api${path}`;
 }
@@ -99,9 +93,10 @@ function toOccurrenceDateString(iso: string) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function formatWeekLabel(weekStart: Date) {
+function formatWeekLabel(weekStart: Date, language: Language) {
   const weekEnd = addDays(weekStart, 6);
-  const fmt = (d: Date) => d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  const locale = language === "fr" ? "fr-FR" : "en-US";
+  const fmt = (d: Date) => d.toLocaleDateString(locale, { day: "numeric", month: "short" });
   return `${fmt(weekStart)} — ${fmt(weekEnd)}`;
 }
 
@@ -118,7 +113,18 @@ function formatDuration(seconds: number | null) {
 
 export default function SchedulePage() {
   const isMobile = useIsMobile();
+  const { t, tList, language } = useAppSettings();
+  const DAY_LABELS = tList("schedule.dayLabels");
+  const DAY_LABELS_FULL = tList("schedule.dayLabelsFull");
   const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
+  // Planning PAR CANAL de diffusion (réf. mission "un planning pour le Câblé
+  // et un pour le Réseau, distincts") : l'onglet actif filtre tout — vue
+  // calendrier, vue liste — et toute création se fait sur ce canal. Ouvrable
+  // directement sur un canal donné via ?channel= (liens des tableaux de bord).
+  const [channel, setChannel] = useState<"cable" | "network">(() => {
+    if (typeof window === "undefined") return "cable";
+    return new URLSearchParams(window.location.search).get("channel") === "network" ? "network" : "cable";
+  });
 
   // La grille calendrier à 7 colonnes n'est pas exploitable sur un écran de
   // téléphone (réf. UX4.1 "présentation adaptée") : bascule sur la vue liste
@@ -127,6 +133,15 @@ export default function SchedulePage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronise avec le viewport (matchMedia), motif déjà accepté ailleurs (useIsMobile, ClientLayout)
     if (isMobile) setViewMode("list");
+  }, [isMobile]);
+
+  // Bibliothèque rapide glisser-déposer (UX3.14) : repliée par défaut sur
+  // téléphone (réf. mission "Double Planning", màj mobile) — le
+  // glisser-déposer HTML5 ne fonctionne pas au toucher, la garder ouverte
+  // n'y mangerait que de la place utile sans rien apporter.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- même motif que viewMode ci-dessus
+    if (isMobile) setLibraryOpen(false);
   }, [isMobile]);
   const [weekStart, setWeekStart] = useState<Date>(() => getWeekStart(new Date()));
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
@@ -167,33 +182,35 @@ export default function SchedulePage() {
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(timer);
   }, [toast]);
 
   const weekEndExclusive = useMemo(() => addDays(weekStart, 7), [weekStart]);
 
   const fetchOccurrences = async (start: Date, end: Date) => {
+    await Promise.resolve();
     setLoading(true);
     try {
-      const params = new URLSearchParams({ start: start.toISOString(), end: end.toISOString() });
+      const params = new URLSearchParams({ start: start.toISOString(), end: end.toISOString(), channel });
       const res = await fetch(getApiUrl(`/schedule/occurrences?${params.toString()}`), { cache: "no-store" });
       if (res.ok) {
         setOccurrences(await res.json());
       } else {
-        showToast("Erreur de chargement du planning", "error");
+        showToast(t("schedule.fetchError"), "error");
       }
     } catch {
-      showToast("Erreur réseau (planning)", "error");
+      showToast(t("schedule.fetchNetworkError"), "error");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchOccurrences(weekStart, weekEndExclusive);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekStart]);
+  }, [weekStart, channel]);
 
   useEffect(() => {
     fetch(getApiUrl("/videos?sort_by=imported_at&order=desc"), { cache: "no-store" })
@@ -279,7 +296,7 @@ export default function SchedulePage() {
     try {
       const res = await fetch(getApiUrl(`/schedule/${scheduleId}`), { cache: "no-store" });
       if (!res.ok) {
-        showToast("Impossible de charger cette programmation", "error");
+        showToast(t("schedule.loadScheduleError"), "error");
         return;
       }
       const data: ScheduleDetail = await res.json();
@@ -295,7 +312,7 @@ export default function SchedulePage() {
       setEditingOverrideCount(data.override_count);
       setDrawerOpen(true);
     } catch {
-      showToast("Erreur réseau", "error");
+      showToast(t("schedule.networkError"), "error");
     }
   };
 
@@ -311,15 +328,15 @@ export default function SchedulePage() {
   const handleSaveSchedule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTargetId) {
-      showToast("Choisissez un cours ou une playlist", "warning");
+      showToast(t("schedule.chooseTargetWarning"), "warning");
       return;
     }
     if (formScheduleType === "once" && !formDateTime) {
-      showToast("Choisissez une date et une heure", "warning");
+      showToast(t("schedule.chooseDateTimeWarning"), "warning");
       return;
     }
     if (formScheduleType === "recurring" && formDaysOfWeek.length === 0) {
-      showToast("Choisissez au moins un jour de la semaine", "warning");
+      showToast(t("schedule.chooseDayWarning"), "warning");
       return;
     }
 
@@ -328,6 +345,9 @@ export default function SchedulePage() {
       target_id: Number(formTargetId),
       schedule_type: formScheduleType,
       active: formActive,
+      // Une programmation appartient au canal de l'onglet actif (réf.
+      // mission "un planning pour le Câblé et un pour le Réseau").
+      channel,
     };
     if (formScheduleType === "once") {
       payload.run_at = new Date(formDateTime).toISOString();
@@ -346,15 +366,15 @@ export default function SchedulePage() {
         body: JSON.stringify(payload),
       });
       if (res.ok) {
-        showToast(editingId ? "Programmation mise à jour" : "Programmation créée");
+        showToast(editingId ? t("schedule.updatedToast") : t("schedule.createdToast"));
         closeDrawer();
         fetchOccurrences(weekStart, weekEndExclusive);
       } else {
         const data = await res.json().catch(() => null);
-        showToast(data?.detail || "Erreur de sauvegarde", "error");
+        showToast(data?.detail || t("schedule.saveError"), "error");
       }
     } catch {
-      showToast("Erreur réseau lors de la sauvegarde", "error");
+      showToast(t("schedule.saveNetworkError"), "error");
     } finally {
       setIsSaving(false);
     }
@@ -371,14 +391,14 @@ export default function SchedulePage() {
     try {
       const res = await fetch(getApiUrl(`/schedule/${scheduleToDeleteId}`), { method: "DELETE" });
       if (res.ok) {
-        showToast("Programmation supprimée");
+        showToast(t("schedule.deletedToast"));
         closeDrawer();
         fetchOccurrences(weekStart, weekEndExclusive);
       } else {
-        showToast("Impossible de supprimer la programmation", "error");
+        showToast(t("schedule.deleteError"), "error");
       }
     } catch {
-      showToast("Erreur réseau", "error");
+      showToast(t("schedule.networkError"), "error");
     } finally {
       setShowDeleteConfirm(false);
       setScheduleToDeleteId(null);
@@ -398,14 +418,14 @@ export default function SchedulePage() {
         body: JSON.stringify({ occurrence_date: toOccurrenceDateString(o.run_at), action: "cancelled" }),
       });
       if (res.ok) {
-        showToast("Occurrence annulée");
+        showToast(t("schedule.cancelledToast"));
         setExpandedKey(null);
         fetchOccurrences(weekStart, weekEndExclusive);
       } else {
-        showToast("Impossible d'annuler cette occurrence", "error");
+        showToast(t("schedule.cancelError"), "error");
       }
     } catch {
-      showToast("Erreur réseau", "error");
+      showToast(t("schedule.networkError"), "error");
     }
   };
 
@@ -416,14 +436,14 @@ export default function SchedulePage() {
         method: "DELETE",
       });
       if (res.ok) {
-        showToast("Occurrence rétablie");
+        showToast(t("schedule.restoredToast"));
         setExpandedKey(null);
         fetchOccurrences(weekStart, weekEndExclusive);
       } else {
-        showToast("Impossible de rétablir cette occurrence", "error");
+        showToast(t("schedule.restoreError"), "error");
       }
     } catch {
-      showToast("Erreur réseau", "error");
+      showToast(t("schedule.networkError"), "error");
     }
   };
 
@@ -442,15 +462,15 @@ export default function SchedulePage() {
         }),
       });
       if (res.ok) {
-        showToast("Occurrence remplacée");
+        showToast(t("schedule.replacedToast"));
         setReplacingKey(null);
         setExpandedKey(null);
         fetchOccurrences(weekStart, weekEndExclusive);
       } else {
-        showToast("Impossible de remplacer cette occurrence", "error");
+        showToast(t("schedule.replaceError"), "error");
       }
     } catch {
-      showToast("Erreur réseau", "error");
+      showToast(t("schedule.networkError"), "error");
     }
   };
 
@@ -464,7 +484,9 @@ export default function SchedulePage() {
     setDragPayload(null);
   };
 
-  const getProgramAccent = (program: string | null) => (program && PROGRAM_ACCENT[program]) || "var(--text-dim)";
+  // Couleur du thème plutôt que du programme du cours (réf. correctif
+  // "couleurs hardcodées associées à un cours" — le thème prime désormais).
+  const getProgramAccent = () => "var(--accent-primary)";
 
   const renderOccurrenceChip = (o: Occurrence, compact: boolean) => {
     const key = occurrenceKey(o);
@@ -477,7 +499,7 @@ export default function SchedulePage() {
       <div
         key={key}
         className={`schedule-occurrence-chip ${isCancelled ? "cancelled" : ""}`}
-        style={{ borderLeftColor: getProgramAccent(o.program) }}
+        style={{ borderLeftColor: getProgramAccent() }}
         onClick={(e) => {
           e.stopPropagation();
           setReplacingKey(null);
@@ -488,9 +510,9 @@ export default function SchedulePage() {
           {formatOccurrenceTime(o.run_at)}
           {compact && ` · ${DAY_LABELS_FULL[(new Date(o.run_at).getDay() + 6) % 7]}`}
         </div>
-        <div className="schedule-occurrence-title">{o.title ?? "Cible introuvable"}</div>
-        {isReplaced && <span className="schedule-occurrence-badge">Remplacé</span>}
-        {isCancelled && <span className="schedule-occurrence-badge">Annulé</span>}
+        <div className="schedule-occurrence-title">{o.title ?? t("schedule.targetNotFound")}</div>
+        {isReplaced && <span className="schedule-occurrence-badge">{t("schedule.replacedBadge")}</span>}
+        {isCancelled && <span className="schedule-occurrence-badge">{t("schedule.cancelledBadge")}</span>}
 
         {isExpanded && (
           <div className="schedule-occurrence-actions" onClick={(e) => e.stopPropagation()}>
@@ -499,16 +521,16 @@ export default function SchedulePage() {
               className="btn btn-secondary"
               onClick={() => openEditDrawer(o.schedule_id)}
             >
-              Modifier la série
+              {t("schedule.editSeries")}
             </button>
             {isRecurring && !isCancelled && !isReplaced && (
               <button type="button" className="btn btn-secondary" onClick={() => handleCancelOccurrence(o)}>
-                Annuler cette occurrence
+                {t("schedule.cancelOccurrence")}
               </button>
             )}
             {isRecurring && (isCancelled || isReplaced) && (
               <button type="button" className="btn btn-secondary" onClick={() => handleRestoreOccurrence(o)}>
-                Rétablir cette occurrence
+                {t("schedule.restoreOccurrence")}
               </button>
             )}
             {isRecurring && !isCancelled && (
@@ -521,15 +543,15 @@ export default function SchedulePage() {
                       onChange={(e) => setReplaceValue(e.target.value)}
                       style={{ width: "100%", height: "26px", fontSize: "0.7rem" }}
                     >
-                      <option value="">Remplacer par...</option>
-                      <optgroup label="Vidéos">
+                      <option value="">{t("schedule.replaceWith")}</option>
+                      <optgroup label={t("schedule.videosGroup")}>
                         {videos.map((v) => (
                           <option key={`v-${v.id}`} value={`video:${v.id}`}>
                             {v.title}
                           </option>
                         ))}
                       </optgroup>
-                      <optgroup label="Playlists">
+                      <optgroup label={t("schedule.playlistsGroup")}>
                         {playlists.map((p) => (
                           <option key={`p-${p.id}`} value={`playlist:${p.id}`}>
                             {p.name}
@@ -538,7 +560,7 @@ export default function SchedulePage() {
                       </optgroup>
                     </select>
                     <button type="button" className="btn btn-primary" onClick={() => handleConfirmReplace(o)}>
-                      Confirmer le remplacement
+                      {t("schedule.confirmReplace")}
                     </button>
                   </>
                 ) : (
@@ -550,7 +572,7 @@ export default function SchedulePage() {
                       setReplacingKey(key);
                     }}
                   >
-                    Remplacer cette occurrence
+                    {t("schedule.replaceOccurrence")}
                   </button>
                 )}
               </>
@@ -570,51 +592,73 @@ export default function SchedulePage() {
       )}
 
       <div className="schedule-toolbar">
+        {/* Onglets de canal (réf. mission "un planning pour le Câblé et un
+            pour le Réseau, distincts") : tout ce qui suit — calendrier,
+            liste, créations — ne concerne que le canal sélectionné. */}
+        <div className="view-toggle">
+          <button
+            className={`view-btn olc-press ${channel === "cable" ? "active" : ""}`}
+            onClick={() => setChannel("cable")}
+            title={t("schedule.channelCableTitle")}
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 12px" }}
+          >
+            <Icon name="cable" size={16} />
+            {t("schedule.channelTabCable")}
+          </button>
+          <button
+            className={`view-btn olc-press ${channel === "network" ? "active" : ""}`}
+            onClick={() => setChannel("network")}
+            title={t("schedule.channelNetworkTitle")}
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 12px" }}
+          >
+            <Icon name="wifi" size={16} />
+            {t("schedule.channelTabNetwork")}
+          </button>
+        </div>
         <div className="week-nav">
-          <button className="btn btn-secondary" onClick={goToPreviousWeek} title="Semaine précédente">
-            ← Préc.
+          <button className="btn btn-secondary" onClick={goToPreviousWeek} title={t("schedule.previousWeekTitle")}>
+            <Icon name="chevron_left" size={16} />
+            {t("schedule.previousWeekShort")}
           </button>
           <button className="btn btn-secondary" onClick={goToToday}>
-            Aujourd&apos;hui
+            {t("schedule.today")}
           </button>
-          <button className="btn btn-secondary" onClick={goToNextWeek} title="Semaine suivante">
-            Suiv. →
+          <button className="btn btn-secondary" onClick={goToNextWeek} title={t("schedule.nextWeekTitle")}>
+            {t("schedule.nextWeekShort")}
+            <Icon name="chevron_right" size={16} />
           </button>
-          <span className="week-nav-label">{formatWeekLabel(weekStart)}</span>
+          <span className="week-nav-label">{formatWeekLabel(weekStart, language)}</span>
         </div>
 
         <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
           <div className="view-toggle">
             <button
-              className={`view-btn ${viewMode === "calendar" ? "active" : ""}`}
+              className={`view-btn olc-press ${viewMode === "calendar" ? "active" : ""}`}
               onClick={() => setViewMode("calendar")}
-              title="Vue calendrier"
+              title={t("schedule.calendarView")}
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
+              <Icon name="calendar_month" size={18} />
             </button>
             <button
-              className={`view-btn ${viewMode === "list" ? "active" : ""}`}
+              className={`view-btn olc-press ${viewMode === "list" ? "active" : ""}`}
               onClick={() => setViewMode("list")}
-              title="Vue liste"
+              title={t("schedule.listView")}
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
+              <Icon name="view_list" size={18} />
             </button>
           </div>
           <button className="btn btn-primary" onClick={() => openCreateDrawer()}>
-            + Nouvelle programmation
+            <Icon name="add" size={18} />
+            {t("schedule.newSchedule")}
           </button>
         </div>
       </div>
 
-      <div className="schedule-body" style={{ flexDirection: "row", gap: "20px" }}>
+      <div className="schedule-body" style={{ flexDirection: isMobile ? "column" : "row", gap: "20px" }}>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
           {loading ? (
             <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}>
-              Chargement du planning...
+              {t("schedule.loadingSchedule")}
             </div>
           ) : viewMode === "calendar" ? (
             <div className="schedule-week-grid">
@@ -640,7 +684,7 @@ export default function SchedulePage() {
                       onClick={() => openCreateDrawer(day)}
                     >
                       {occurrencesByDay[index].length === 0 ? (
-                        <div className="schedule-day-empty-hint">Cliquez ou glissez un cours ici</div>
+                        <div className="schedule-day-empty-hint">{t("schedule.emptyDayHint")}</div>
                       ) : (
                         occurrencesByDay[index].map((o) => renderOccurrenceChip(o, false))
                       )}
@@ -653,7 +697,7 @@ export default function SchedulePage() {
             <div className="schedule-list-scroll">
               {sortedOccurrences.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
-                  Aucune programmation cette semaine.
+                  {t("schedule.noScheduleThisWeek")}
                 </div>
               ) : (
                 weekDays.map((day, index) =>
@@ -673,29 +717,30 @@ export default function SchedulePage() {
           )}
         </div>
 
-        {/* Bibliothèque rapide (glisser-déposer sur un jour, UX3.14) */}
+        {/* Bibliothèque rapide (glisser-déposer sur un jour, UX3.14) : le
+            glisser-déposer HTML5 n'existe pas au toucher, ce panneau reste
+            surtout un raccourci de recherche sur téléphone — d'où la largeur
+            pleine plutôt que la colonne fixe du PC. */}
         {libraryOpen && (
-          <div className="library-picker" style={{ width: "260px", height: "auto", flexShrink: 0 }}>
+          <div className="library-picker" style={{ width: isMobile ? "100%" : "260px", height: "auto", flexShrink: 0 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span className="form-label" style={{ margin: 0 }}>
-                Bibliothèque rapide
+                {t("schedule.quickLibrary")}
               </span>
-              <button className="close-btn" onClick={() => setLibraryOpen(false)} title="Masquer">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+              <button className="close-btn" onClick={() => setLibraryOpen(false)} title={t("schedule.hide")}>
+                <Icon name="close" size={16} />
               </button>
             </div>
             <input
               type="text"
               className="form-control"
-              placeholder="Rechercher..."
+              placeholder={t("schedule.searchPlaceholder")}
               value={librarySearch}
               onChange={(e) => setLibrarySearch(e.target.value)}
               style={{ height: "32px", fontSize: "0.8rem" }}
             />
             <p style={{ fontSize: "0.7rem", color: "var(--text-dim)", margin: 0 }}>
-              Glissez un élément sur un jour du calendrier pour créer une programmation.
+              {t("schedule.dragHint")}
             </p>
             <div className="library-picker-list">
               {filteredVideos.map((v) => (
@@ -718,15 +763,16 @@ export default function SchedulePage() {
                   draggable
                   onDragStart={() => setDragPayload({ type: "playlist", id: p.id })}
                 >
-                  <span style={{ fontWeight: 700, fontSize: "0.8rem", color: "var(--text-main)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    ▶ {p.name}
+                  <span style={{ fontWeight: 700, fontSize: "0.8rem", color: "var(--text-main)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <Icon name="playlist_play" size={14} />
+                    {p.name}
                   </span>
-                  <span style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>{p.item_count} cours</span>
+                  <span style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>{t("schedule.coursesCount", { count: p.item_count })}</span>
                 </div>
               ))}
               {filteredVideos.length === 0 && filteredPlaylists.length === 0 && (
                 <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: "0.75rem", padding: "12px" }}>
-                  Aucun résultat.
+                  {t("schedule.noResults")}
                 </div>
               )}
             </div>
@@ -735,10 +781,10 @@ export default function SchedulePage() {
         {!libraryOpen && (
           <button
             className="btn btn-secondary"
-            style={{ writingMode: "vertical-rl", height: "100%" }}
+            style={isMobile ? { width: "100%" } : { writingMode: "vertical-rl", height: "100%" }}
             onClick={() => setLibraryOpen(true)}
           >
-            Bibliothèque
+            {t("schedule.libraryCollapsed")}
           </button>
         )}
       </div>
@@ -750,17 +796,15 @@ export default function SchedulePage() {
           <div className="detail-drawer">
             <div className="drawer-header">
               <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0 }}>
-                {editingId ? "Modifier la programmation" : "Nouvelle programmation"}
+                {editingId ? t("schedule.editScheduleTitle") : t("schedule.newScheduleTitle")}
               </h3>
               <button className="close-btn" onClick={closeDrawer}>
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon name="close" size={20} />
               </button>
             </div>
             <form onSubmit={handleSaveSchedule} className="drawer-body drawer-form">
               <div className="form-group">
-                <label className="form-label">Cible</label>
+                <label className="form-label">{t("schedule.targetLabel")}</label>
                 <div className="speed-group" style={{ width: "100%" }}>
                   <button
                     type="button"
@@ -771,7 +815,7 @@ export default function SchedulePage() {
                       setFormTargetId("");
                     }}
                   >
-                    Vidéo
+                    {t("schedule.videoOption")}
                   </button>
                   <button
                     type="button"
@@ -782,7 +826,7 @@ export default function SchedulePage() {
                       setFormTargetId("");
                     }}
                   >
-                    Playlist
+                    {t("schedule.playlistOption")}
                   </button>
                 </div>
               </div>
@@ -791,7 +835,7 @@ export default function SchedulePage() {
                 <input
                   type="text"
                   className="form-control"
-                  placeholder="Rechercher..."
+                  placeholder={t("schedule.searchPlaceholder")}
                   value={formTargetSearch}
                   onChange={(e) => setFormTargetSearch(e.target.value)}
                 />
@@ -807,7 +851,7 @@ export default function SchedulePage() {
                           style={{
                             cursor: "pointer",
                             borderColor: selected ? "var(--accent-primary)" : undefined,
-                            background: selected ? "rgba(228, 0, 43, 0.08)" : undefined,
+                            background: selected ? "color-mix(in srgb, var(--accent-primary) 8%, transparent)" : undefined,
                           }}
                           onClick={() => setFormTargetId(String(opt.id))}
                         >
@@ -818,14 +862,14 @@ export default function SchedulePage() {
                 </div>
                 {formTargetId && (
                   <span style={{ fontSize: "0.75rem", color: "var(--accent-success)" }}>
-                    Sélectionné :{" "}
+                    {t("schedule.selectedLabel")}{" "}
                     {formTargetType === "video" ? findVideo(Number(formTargetId))?.title : findPlaylist(Number(formTargetId))?.name}
                   </span>
                 )}
               </div>
 
               <div className="form-group">
-                <label className="form-label">Type de programmation</label>
+                <label className="form-label">{t("schedule.scheduleTypeLabel")}</label>
                 <div className="speed-group" style={{ width: "100%" }}>
                   <button
                     type="button"
@@ -833,7 +877,7 @@ export default function SchedulePage() {
                     style={{ flex: 1 }}
                     onClick={() => setFormScheduleType("once")}
                   >
-                    Ponctuelle
+                    {t("schedule.onceOption")}
                   </button>
                   <button
                     type="button"
@@ -841,14 +885,14 @@ export default function SchedulePage() {
                     style={{ flex: 1 }}
                     onClick={() => setFormScheduleType("recurring")}
                   >
-                    Récurrente
+                    {t("schedule.recurringOption")}
                   </button>
                 </div>
               </div>
 
               {formScheduleType === "once" ? (
                 <div className="form-group">
-                  <label className="form-label">Date et heure</label>
+                  <label className="form-label">{t("schedule.dateTimeLabel")}</label>
                   <input
                     type="datetime-local"
                     className="form-control"
@@ -859,7 +903,7 @@ export default function SchedulePage() {
               ) : (
                 <>
                   <div className="form-group">
-                    <label className="form-label">Jours de la semaine</label>
+                    <label className="form-label">{t("schedule.daysOfWeekLabel")}</label>
                     <div className="speed-group" style={{ width: "100%" }}>
                       {DAY_LABELS.map((label, idx) => (
                         <button
@@ -875,7 +919,7 @@ export default function SchedulePage() {
                     </div>
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Heure</label>
+                    <label className="form-label">{t("schedule.hourLabel")}</label>
                     <input
                       type="time"
                       className="form-control"
@@ -894,27 +938,26 @@ export default function SchedulePage() {
                   style={{ width: "18px", height: "18px" }}
                 />
                 <label className="form-label" style={{ margin: 0 }}>
-                  Active
+                  {t("schedule.activeLabel")}
                 </label>
               </div>
 
               {editingId && editingOverrideCount > 0 && (
                 <p style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                  {editingOverrideCount} occurrence(s) avec exception (annulée ou remplacée) — gérables directement
-                  depuis le planning.
+                  {t("schedule.overrideCountHint", { count: editingOverrideCount })}
                 </p>
               )}
 
               <div className="drawer-actions">
                 <button type="submit" className="btn btn-primary" disabled={isSaving}>
-                  {isSaving ? "Enregistrement..." : "Enregistrer"}
+                  {isSaving ? t("common.saving") : t("common.save")}
                 </button>
                 <button type="button" className="btn btn-secondary" onClick={closeDrawer} disabled={isSaving}>
-                  Annuler
+                  {t("common.cancel")}
                 </button>
                 {editingId && (
                   <button type="button" className="btn btn-danger" onClick={triggerDeleteSchedule} disabled={isSaving}>
-                    Supprimer la programmation
+                    {t("schedule.deleteScheduleBtn")}
                   </button>
                 )}
               </div>
@@ -927,13 +970,13 @@ export default function SchedulePage() {
       {showDeleteConfirm && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3 style={{ fontSize: "1.1rem", margin: "0 0 12px" }}>Supprimer la programmation ?</h3>
+            <h3 style={{ fontSize: "1.1rem", margin: "0 0 12px" }}>{t("schedule.deleteScheduleTitle")}</h3>
             <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: "0 0 20px", lineHeight: 1.5 }}>
-              Cette action est irréversible et supprime également toutes les exceptions (overrides) associées.
+              {t("schedule.deleteScheduleConfirm")}
             </p>
             <div className="modal-actions">
               <button className="btn btn-danger" onClick={confirmDeleteSchedule}>
-                Supprimer
+                {t("common.delete")}
               </button>
               <button
                 className="btn btn-secondary"
@@ -942,7 +985,7 @@ export default function SchedulePage() {
                   setScheduleToDeleteId(null);
                 }}
               >
-                Annuler
+                {t("common.cancel")}
               </button>
             </div>
           </div>

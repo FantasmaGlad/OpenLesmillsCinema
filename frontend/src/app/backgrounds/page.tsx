@@ -2,6 +2,9 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { usePlaybackSocket } from "@/lib/usePlaybackSocket";
+import { useAppSettings } from "@/lib/AppSettingsContext";
+import { useUploadManager, PendingUploadSpec } from "@/lib/UploadManager";
+import Icon from "@/components/Icon";
 
 interface BackgroundItem {
   id: number;
@@ -18,7 +21,7 @@ interface ToastState {
 
 function getApiUrl(path: string) {
   if (typeof window !== "undefined" && window.location.port === "3000") {
-    return `http://localhost:8000/api${path}`;
+    return `http://localhost:8001/api${path}`;
   }
   return `/api${path}`;
 }
@@ -34,6 +37,7 @@ function BackgroundCard({
   onLaunch: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useAppSettings();
   const [hovering, setHovering] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -72,20 +76,18 @@ function BackgroundCard({
         ) : thumbSrc ? (
           <img src={thumbSrc} alt={bg.title} className="card-thumbnail" />
         ) : (
-          <div style={{ position: "absolute", inset: 0, background: "#0c0c0e", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ opacity: 0.2, width: "32px", height: "32px" }}>
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
+          <div style={{ position: "absolute", inset: 0, background: "var(--bg-surface-elevated)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="gradient" size={32} style={{ opacity: 0.2 }} />
           </div>
         )}
-        {isActive && <span className="card-duration" style={{ background: "var(--accent-success)", left: 8, right: "auto" }}>À l&apos;écran</span>}
+        {isActive && <span className="card-duration" style={{ background: "var(--accent-success)", left: 8, right: "auto" }}>{t("backgrounds.onScreen")}</span>}
       </div>
       <div className="card-content">
         <h4 className="card-title" title={bg.title}>
           {bg.title}
         </h4>
         <div className="card-meta-row">
-          <span className="release-badge">Boucle infinie</span>
+          <span className="release-badge">{t("backgrounds.infiniteLoop")}</span>
           <button
             type="button"
             className="btn btn-danger"
@@ -95,7 +97,7 @@ function BackgroundCard({
               onDelete();
             }}
           >
-            Supprimer
+            {t("common.delete")}
           </button>
         </div>
       </div>
@@ -104,16 +106,35 @@ function BackgroundCard({
 }
 
 export default function BackgroundsPage() {
-  const { state, sendCommand } = usePlaybackSocket();
+  const { t } = useAppSettings();
+  // Canal ciblé par "Lancer" (réf. correctif "afficher un fond ne marche
+  // pas — le kiosk réseau ne le lance jamais") : `usePlaybackSocket()` sans
+  // argument cible TOUJOURS le canal câblé par défaut — cette page n'avait
+  // aucun moyen de viser le réseau, un clic "Lancer" depuis ici n'affichait
+  // donc jamais rien sur un kiosk réseau, quel que soit l'appareil utilisé
+  // pour cliquer. Même sélecteur de canal que la page Planning.
+  const [channel, setChannel] = useState<"cable" | "network">("cable");
+  const { state, sendCommand } = usePlaybackSocket(undefined, undefined, channel);
   const [backgrounds, setBackgrounds] = useState<BackgroundItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<ToastState | null>(null);
 
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadTitle, setUploadTitle] = useState("");
-  const [uploadProgress, setUploadProgress] = useState(-1);
+  // Mini-formulaires pour préparer les titres avant l'upload, même principe
+  // que la bibliothèque vidéo (réf. mission "queue en direct des
+  // importations + import parallèle") : plusieurs fichiers peuvent être
+  // sélectionnés et lancés à la fois, et la zone reste utilisable pendant
+  // qu'un import précédent est encore traité côté serveur — l'ancienne
+  // version bloquait la sélection d'un second fichier tant que le premier
+  // n'était pas totalement terminé (transfert + normalisation ffmpeg
+  // éventuelle), impossible de lancer un second import en attendant.
+  const [pendingSpecs, setPendingSpecs] = useState<Array<PendingUploadSpec & { key: string }>>([]);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { addUploads, uploads } = useUploadManager();
+  // Réf. mission "voir en direct les importations" : évite de redéclencher
+  // un fetch à chaque tick de polling tant qu'aucun import de fond animé n'a
+  // nouvellement terminé (effet déclaré plus bas, après `fetchBackgrounds`).
+  const seenDoneIds = useRef<Set<string>>(new Set());
 
   const [toDelete, setToDelete] = useState<BackgroundItem | null>(null);
 
@@ -130,9 +151,9 @@ export default function BackgroundsPage() {
     try {
       const res = await fetch(getApiUrl("/backgrounds"), { cache: "no-store" });
       if (res.ok) setBackgrounds(await res.json());
-      else showToast("Erreur lors de la récupération des fonds animés", "error");
+      else showToast(t("backgrounds.fetchError"), "error");
     } catch {
-      showToast("Impossible de se connecter au serveur", "error");
+      showToast(t("backgrounds.connectionError"), "error");
     } finally {
       setLoading(false);
     }
@@ -144,9 +165,27 @@ export default function BackgroundsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const setupUpload = (file: File) => {
-    setUploadFile(file);
-    setUploadTitle(file.name.substring(0, file.name.lastIndexOf(".")) || file.name);
+  // Rafraîchit la liste dès qu'un import de fond animé se termine (réf.
+  // mission "voir en direct les importations") — voir library/page.tsx pour
+  // le même mécanisme.
+  useEffect(() => {
+    const newlyDone = uploads.filter(
+      (u) => u.kind === "background" && u.status === "done" && !seenDoneIds.current.has(u.id)
+    );
+    if (newlyDone.length === 0) return;
+    newlyDone.forEach((u) => seenDoneIds.current.add(u.id));
+    fetchBackgrounds();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploads]);
+
+  const addPendingSpecs = (files: File[]) => {
+    const specs = files.map((file) => ({
+      key: Math.random().toString(36).slice(2),
+      kind: "background" as const,
+      file,
+      title: file.name.substring(0, file.name.lastIndexOf(".")) || file.name,
+    }));
+    setPendingSpecs((prev) => [...prev, ...specs]);
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -159,50 +198,28 @@ export default function BackgroundsPage() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files?.[0]) setupUpload(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files?.length) addPendingSpecs(Array.from(e.dataTransfer.files));
   };
 
-  const cancelUpload = () => {
-    setUploadFile(null);
-    setUploadTitle("");
-    setUploadProgress(-1);
+  const updatePendingSpec = (key: string, patch: Partial<PendingUploadSpec>) => {
+    setPendingSpecs((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
   };
 
-  const executeUpload = () => {
-    if (!uploadFile) return;
-    const xhr = new XMLHttpRequest();
-    const formData = new FormData();
-    formData.append("file", uploadFile);
-    if (uploadTitle) formData.append("title", uploadTitle);
+  const removePendingSpec = (key: string) => {
+    setPendingSpecs((prev) => prev.filter((s) => s.key !== key));
+  };
 
-    xhr.upload.addEventListener("progress", (e) => {
-      if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
-    });
-    xhr.addEventListener("load", () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        showToast("Fond animé importé avec succès !");
-        fetchBackgrounds();
-        cancelUpload();
-      } else {
-        let errMsg = "Erreur lors de l'importation";
-        try {
-          errMsg = JSON.parse(xhr.responseText).detail || errMsg;
-        } catch {}
-        showToast(errMsg, "error");
-        setUploadProgress(-1);
-      }
-    });
-    xhr.addEventListener("error", () => {
-      showToast("Erreur réseau pendant l'upload", "error");
-      setUploadProgress(-1);
-    });
-    xhr.open("POST", getApiUrl("/backgrounds/upload"));
-    xhr.send(formData);
+  const submitPendingUploads = () => {
+    if (pendingSpecs.length === 0) return;
+    addUploads(pendingSpecs.map(({ file, title }) => ({ kind: "background" as const, file, title })));
+    // Le résultat de chaque import (succès/échec) est visible en direct dans
+    // le panneau d'imports flottant — plus besoin d'un toast générique ici.
+    setPendingSpecs([]);
   };
 
   const handleLaunch = (bg: BackgroundItem) => {
     sendCommand("load_background", { background_id: bg.id });
-    showToast(`Fond animé « ${bg.title} » lancé à l'écran`);
+    showToast(t("backgrounds.launchedToast", { title: bg.title }));
   };
 
   const confirmDelete = async () => {
@@ -210,10 +227,10 @@ export default function BackgroundsPage() {
     try {
       const res = await fetch(getApiUrl(`/backgrounds/${toDelete.id}`), { method: "DELETE" });
       if (res.ok) {
-        showToast("Fond animé supprimé");
+        showToast(t("backgrounds.deletedToast"));
         setBackgrounds((prev) => prev.filter((b) => b.id !== toDelete.id));
       } else {
-        showToast("Impossible de supprimer le fond animé", "error");
+        showToast(t("backgrounds.deleteError"), "error");
       }
     } finally {
       setToDelete(null);
@@ -228,93 +245,123 @@ export default function BackgroundsPage() {
         </div>
       )}
 
+      {/* Sélecteur de canal (réf. correctif "afficher un fond ne marche
+          pas") : détermine sur quel écran "Lancer" affiche le fond cliqué,
+          et duquel des deux canaux le badge "à l'écran" reflète l'état. */}
+      <div className="view-toggle" style={{ alignSelf: "flex-start" }}>
+        <button
+          className={`view-btn olc-press ${channel === "cable" ? "active" : ""}`}
+          onClick={() => setChannel("cable")}
+          title={t("backgrounds.channelCableTitle")}
+          style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 12px" }}
+        >
+          <Icon name="cable" size={16} />
+          {t("backgrounds.channelTabCable")}
+        </button>
+        <button
+          className={`view-btn olc-press ${channel === "network" ? "active" : ""}`}
+          onClick={() => setChannel("network")}
+          title={t("backgrounds.channelNetworkTitle")}
+          style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 12px" }}
+        >
+          <Icon name="wifi" size={16} />
+          {t("backgrounds.channelTabNetwork")}
+        </button>
+      </div>
+
       <div
         className={`upload-zone ${dragActive ? "drag-active" : ""}`}
         onDragEnter={handleDrag}
         onDragOver={handleDrag}
         onDragLeave={handleDrag}
         onDrop={handleDrop}
-        onClick={() => !uploadFile && fileInputRef.current?.click()}
+        onClick={() => {
+          if (pendingSpecs.length === 0 && fileInputRef.current) fileInputRef.current.click();
+        }}
       >
         <input
           ref={fileInputRef}
           type="file"
           accept="video/*"
+          multiple
           style={{ display: "none" }}
-          onChange={(e) => e.target.files?.[0] && setupUpload(e.target.files[0])}
+          onChange={(e) => {
+            if (e.target.files?.length) addPendingSpecs(Array.from(e.target.files));
+            e.target.value = "";
+          }}
         />
-        {!uploadFile ? (
+        {pendingSpecs.length === 0 ? (
           <>
-            <svg className="w-10 h-10 upload-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: "40px", height: "40px" }}>
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
+            <Icon name="cloud_upload" size={48} className="upload-icon" />
             <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: "8px 0 4px" }}>
-              Faites glisser une boucle d&apos;ambiance ici ou cliquez pour parcourir
+              {t("backgrounds.dropHint")}
             </h3>
             <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: 0 }}>
-              Formats recommandés : MP4, WebM, MKV. Joué en boucle, sans son.
+              {t("backgrounds.formatsHint")}
             </p>
           </>
         ) : (
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: "500px", textAlign: "left" }}>
-            <div className="form-group">
-              <label className="form-label">Nom du fond animé</label>
-              <input
-                type="text"
-                className="form-control"
-                value={uploadTitle}
-                onChange={(e) => setUploadTitle(e.target.value)}
-                disabled={uploadProgress >= 0}
-              />
-            </div>
-            <div style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "12px 0" }}>
-              Fichier : <span style={{ color: "var(--text-main)", fontWeight: 600 }}>{uploadFile.name}</span> (
-              {(uploadFile.size / (1024 * 1024)).toFixed(1)} Mo)
-            </div>
-            {uploadProgress >= 0 ? (
-              <div className="upload-progress-container">
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", fontWeight: 700 }}>
-                  <span>Téléversement...</span>
-                  <span>{uploadProgress}%</span>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: "560px", textAlign: "left" }}>
+            <h3 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: "12px", color: "var(--accent-primary)", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+              {pendingSpecs.length} fichier{pendingSpecs.length > 1 ? "s" : ""} sélectionné{pendingSpecs.length > 1 ? "s" : ""}
+            </h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "320px", overflowY: "auto", paddingRight: "4px" }}>
+              {pendingSpecs.map((spec) => (
+                <div key={spec.key} style={{ background: "var(--bg-surface-hover)", borderRadius: "8px", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={spec.file?.name}>
+                      {spec.file?.name} ({((spec.file?.size ?? 0) / (1024 * 1024)).toFixed(1)} Mo)
+                    </span>
+                    <button onClick={() => removePendingSpec(spec.key)} className="olc-press" style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, display: "flex" }}>
+                      <Icon name="close" size={16} />
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={t("backgrounds.nameLabel")}
+                    value={spec.title}
+                    onChange={(e) => updatePendingSpec(spec.key, { title: e.target.value })}
+                    style={{ padding: "6px 10px", fontSize: "0.85rem" }}
+                  />
                 </div>
-                <div className="progress-bar-bg">
-                  <div className="progress-bar-fill" style={{ width: `${uploadProgress}%` }} />
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: "flex", gap: "12px" }}>
-                <button type="button" className="btn btn-primary" onClick={executeUpload} style={{ flex: 1, height: "48px" }}>
-                  Lancer l&apos;importation
-                </button>
-                <button type="button" className="btn btn-secondary" onClick={cancelUpload} style={{ height: "48px" }}>
-                  Annuler
-                </button>
-              </div>
-            )}
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: "12px", marginTop: "14px" }}>
+              <button type="button" className="btn btn-primary" onClick={submitPendingUploads} style={{ flex: 1, height: "44px" }}>
+                {t("backgrounds.startImport")} ({pendingSpecs.length})
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => setPendingSpecs([])} style={{ height: "44px" }}>
+                {t("common.cancel")}
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => fileInputRef.current?.click()} style={{ height: "44px", whiteSpace: "nowrap" }}>
+                + Ajouter
+              </button>
+            </div>
           </div>
         )}
       </div>
 
       {state.state === "background" && (
-        <div className="interrupted-block" style={{ borderColor: "rgba(48, 209, 88, 0.35)" }}>
+        <div className="interrupted-block" style={{ borderColor: "color-mix(in srgb, var(--accent-success) 35%, transparent)" }}>
           <div className="interrupted-text">
-            <span className="interrupted-label" style={{ color: "var(--accent-success)" }}>À l&apos;écran en ce moment</span>
+            <span className="interrupted-label" style={{ color: "var(--accent-success)" }}>{t("backgrounds.onScreenNow")}</span>
             <span className="interrupted-title">{state.current_background?.title}</span>
           </div>
           <button className="btn btn-secondary" onClick={() => sendCommand("stop")}>
-            Arrêter
+            {t("backgrounds.stop")}
           </button>
         </div>
       )}
 
       {loading ? (
         <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", minHeight: "300px", color: "var(--text-muted)" }}>
-          Chargement des fonds animés...
+          {t("backgrounds.loadingBackgrounds")}
         </div>
       ) : backgrounds.length === 0 ? (
         <div style={{ display: "flex", flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "300px", color: "var(--text-muted)" }}>
-          <p style={{ margin: 0, fontWeight: 600 }}>Aucun fond animé importé</p>
-          <p style={{ fontSize: "0.85rem", margin: "4px 0 0" }}>Importez une boucle d&apos;ambiance pour les cours donnés en physique</p>
+          <p style={{ margin: 0, fontWeight: 600 }}>{t("backgrounds.noBackgroundsTitle")}</p>
+          <p style={{ fontSize: "0.85rem", margin: "4px 0 0" }}>{t("backgrounds.noBackgroundsHint")}</p>
         </div>
       ) : (
         <div className="videos-grid">
@@ -333,17 +380,17 @@ export default function BackgroundsPage() {
       {toDelete && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0 }}>Supprimer ce fond animé ?</h3>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0 }}>{t("backgrounds.deleteBackgroundTitle")}</h3>
             <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
-              Êtes-vous sûr de vouloir supprimer définitivement{" "}
-              <strong style={{ color: "var(--text-main)" }}>{toDelete.title}</strong> ? Cette action est irréversible.
+              {t("backgrounds.deleteBackgroundConfirmBefore")}{" "}
+              <strong style={{ color: "var(--text-main)" }}>{toDelete.title}</strong>{t("backgrounds.deleteBackgroundConfirmAfter")}
             </p>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setToDelete(null)}>
-                Annuler
+                {t("common.cancel")}
               </button>
               <button type="button" className="btn btn-primary" style={{ backgroundColor: "var(--accent-error)" }} onClick={confirmDelete}>
-                Confirmer la suppression
+                {t("backgrounds.confirmDelete")}
               </button>
             </div>
           </div>
