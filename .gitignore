@@ -25,6 +25,7 @@ backend/data/
 # Outillage local (agents IA, éditeurs)
 .claude/
 .agents/
+.agent/
 .gemini/
 CLAUDE.md
 AGENTS.md
