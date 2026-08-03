@@ -13,6 +13,7 @@ from app.database import SessionLocal
 from app.models import AudioCourse, AudioTrack
 from app.utils.activity_log import log_activity
 from app.utils.audio_utils import extract_audio_duration, parse_track_number_and_title
+from app.utils.import_jobs import update_job
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ def import_audio_course_from_files(
     course_title: str,
     program: str | None = None,
     release: str | None = None,
+    job_id: str | None = None,
 ) -> AudioCourse:
     """
     Importe un cours audio à partir d'une liste de fichiers MP3 déjà présents
@@ -84,10 +86,14 @@ def import_audio_course_from_files(
     `settings.audio_dir`, extrait durée/numéro/titre par piste (ffprobe +
     parsing du nom de fichier), crée le cours et ses pistes en base dans
     l'ordre déduit du nom de fichier (réordonnable ensuite depuis l'UI).
+
+    `job_id` (réf. mission "queue en direct des importations") : voir
+    `app.utils.importer.import_video` pour la même mécanique de suivi.
     """
     if not mp3_paths:
         raise ValueError("Aucun fichier MP3 fourni pour l'import du cours audio.")
 
+    update_job(job_id, stage="probing")
     course_dir = Path(settings.audio_dir) / f"course_{uuid.uuid4().hex}"
     course_dir.mkdir(parents=True, exist_ok=True)
 
@@ -100,6 +106,7 @@ def import_audio_course_from_files(
     # Tri : par numéro déduit du nom de fichier si présent, sinon par nom (ordre stable)
     parsed.sort(key=lambda t: (t[0] is None, t[0] if t[0] is not None else 0, str(t[2])))
 
+    update_job(job_id, stage="saving")
     db = SessionLocal()
     try:
         course = AudioCourse(
@@ -156,8 +163,10 @@ def import_audio_course_from_zip(
     course_title: str,
     program: str | None = None,
     release: str | None = None,
+    job_id: str | None = None,
 ) -> AudioCourse:
     """Extrait une archive ZIP d'un cours complet puis importe les MP3 qu'elle contient (réf. F10.1)."""
+    update_job(job_id, stage="extracting")
     with tempfile.TemporaryDirectory() as tmp_dir:
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
@@ -175,10 +184,10 @@ def import_audio_course_from_zip(
         if not mp3_paths:
             raise ValueError("Aucun fichier MP3 trouvé dans l'archive ZIP.")
 
-        return import_audio_course_from_files(mp3_paths, course_title, program, release)
+        return import_audio_course_from_files(mp3_paths, course_title, program, release, job_id=job_id)
 
 
-def import_audio_course_from_watched_folder(course_dir: str) -> AudioCourse:
+def import_audio_course_from_watched_folder(course_dir: str, job_id: str | None = None) -> AudioCourse:
     """
     Importe un cours audio détecté par le watcher (réf. F10.1, import par
     dossier surveillé) : le nom du sous-dossier devient le titre du cours,
@@ -195,7 +204,7 @@ def import_audio_course_from_watched_folder(course_dir: str) -> AudioCourse:
     if not mp3_paths:
         raise ValueError(f"Le dossier {path.name} ne contient aucun fichier MP3.")
 
-    course = import_audio_course_from_files(mp3_paths, course_title)
+    course = import_audio_course_from_files(mp3_paths, course_title, job_id=job_id)
 
     # Le sous-dossier source (copié par l'utilisateur dans le dossier
     # surveillé) est maintenant vide de ses MP3 (déplacés dans audio_dir) :

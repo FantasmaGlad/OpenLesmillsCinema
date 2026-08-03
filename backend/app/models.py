@@ -120,6 +120,44 @@ class PlaylistItem(Base):
     video: Mapped[Video] = relationship(back_populates="playlist_items")
 
 
+class AudioPlaylist(Base):
+    """Playlist spéciale composée de pistes individuelles piochées dans
+    n'importe quel cours audio (réf. mission "playlists spéciales... des
+    musiques de plusieurs RPM différents, pas juste plusieurs RPM collés") :
+    une "édition mixée" est une séquence de PISTES (pas de cours entiers
+    enchaînés) — un mix peut donc combiner des morceaux de RPM 101, 103 et
+    110 dans n'importe quel ordre."""
+    __tablename__ = "audio_playlists"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+
+    items: Mapped[list["AudioPlaylistItem"]] = relationship(
+        back_populates="playlist", order_by="AudioPlaylistItem.position", cascade="all, delete-orphan"
+    )
+
+
+class AudioPlaylistItem(Base):
+    __tablename__ = "audio_playlist_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    playlist_id: Mapped[int] = mapped_column(ForeignKey("audio_playlists.id"))
+    audio_track_id: Mapped[int] = mapped_column(ForeignKey("audio_tracks.id"))
+    position: Mapped[int]
+    # Fond d'ambiance propre à CETTE piste dans CETTE playlist (réf. mission
+    # "associer un fond animé à chaque musique qui se jouera en arrière
+    # plan") : rattaché à l'item plutôt qu'à la piste elle-même, une même
+    # piste pouvant apparaître dans plusieurs playlists avec un fond
+    # différent à chaque fois. Nul = pas de fond propre, le fond de la
+    # playlist/du cours (défini au lancement) reste affiché pour cette piste.
+    background_id: Mapped[int | None] = mapped_column(ForeignKey("backgrounds.id"))
+
+    playlist: Mapped[AudioPlaylist] = relationship(back_populates="items")
+    track: Mapped["AudioTrack"] = relationship()
+    background: Mapped[Background | None] = relationship()
+
+
 class Schedule(Base):
     __tablename__ = "schedules"
 
@@ -130,6 +168,10 @@ class Schedule(Base):
     recurrence_rule: Mapped[str | None]
     run_at: Mapped[datetime | None]
     active: Mapped[bool] = mapped_column(default=True)
+    # Canal de diffusion ciblé par cette programmation (réf. mission
+    # "tableaux de bord Câblé / Réseau") : "cable" ou "network" — chaque
+    # canal a son planning propre, déclenché sur SON état de lecture.
+    channel: Mapped[str] = mapped_column(default="cable", server_default="cable")
 
     overrides: Mapped[list["ScheduleOverride"]] = relationship(
         back_populates="schedule", cascade="all, delete-orphan"
@@ -168,6 +210,9 @@ class PlaybackState(Base):
     target_type: Mapped[str | None]
     target_id: Mapped[int | None]
     cause: Mapped[str | None]
+    # Canal dont la lecture a été interrompue/reportée (une action différée
+    # en attente PAR canal, réf. mission "tableaux de bord Câblé / Réseau").
+    channel: Mapped[str] = mapped_column(default="cable", server_default="cable")
     interrupted_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
 

@@ -18,6 +18,7 @@ from app.models import (
     Video,
 )
 from app.scheduler_manager import (
+    broadcast_schedule_change,
     ensure_utc,
     expand_occurrences,
     remove_schedule_job,
@@ -37,6 +38,9 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 class ScheduleInput(BaseModel):
     target_type: ScheduleTargetType
     target_id: int
+    # Canal de diffusion ciblé (réf. mission "tableaux de bord Câblé /
+    # Réseau") : un planning par canal, "cable" par défaut (compatibilité).
+    channel: str = "cable"
     schedule_type: ScheduleType
     run_at: datetime | None = None
     days_of_week: List[int] | None = None  # 0=lundi .. 6=dimanche
@@ -46,6 +50,7 @@ class ScheduleInput(BaseModel):
 
 class ScheduleResponse(BaseModel):
     id: int
+    channel: str
     target_type: ScheduleTargetType
     target_id: int
     target_title: str | None
@@ -76,6 +81,7 @@ class OverrideResponse(BaseModel):
 
 class OccurrenceResponse(BaseModel):
     schedule_id: int
+    channel: str
     schedule_type: ScheduleType
     run_at: datetime
     target_type: ScheduleTargetType
@@ -131,6 +137,7 @@ def _to_response(db: Session, schedule: Schedule) -> dict:
         time_of_day = rule.get("time")
     return {
         "id": schedule.id,
+        "channel": schedule.channel or "cable",
         "target_type": schedule.target_type,
         "target_id": schedule.target_id,
         "target_title": title,
@@ -148,34 +155,44 @@ def _to_response(db: Session, schedule: Schedule) -> dict:
 # Programmations (CRUD)
 # ---------------------------------------------------------------------------
 @router.get("", response_model=List[ScheduleResponse])
-def list_schedules(db: Session = Depends(get_db)):
-    schedules = db.query(Schedule).order_by(Schedule.id.desc()).all()
-    return [_to_response(db, s) for s in schedules]
+def list_schedules(channel: str | None = None, db: Session = Depends(get_db)):
+    """Liste des programmations, filtrable par canal de diffusion (réf.
+    mission "tableaux de bord Câblé / Réseau" : un planning par canal)."""
+    query = db.query(Schedule)
+    if channel in ("cable", "network"):
+        query = query.filter(Schedule.channel == channel)
+    return [_to_response(db, s) for s in query.order_by(Schedule.id.desc()).all()]
 
 
 @router.get("/occurrences", response_model=List[OccurrenceResponse])
-def list_occurrences(start: datetime, end: datetime, db: Session = Depends(get_db)):
+def list_occurrences(start: datetime, end: datetime, channel: str | None = None, db: Session = Depends(get_db)):
     """
     Occurrences résolues (récurrence + overrides) dans [start, end], pour les
     vues planning calendrier/liste (UX3.14-3.16). Inclut les occurrences
-    annulées (à afficher barrées côté UI).
+    annulées (à afficher barrées côté UI). Filtrable par canal de diffusion.
     """
     start, end = ensure_utc(start), ensure_utc(end)
     if end <= start:
         raise HTTPException(status_code=400, detail="La date de fin doit être postérieure à la date de début")
-    schedules = db.query(Schedule).filter(Schedule.active == True).all()  # noqa: E712
-    return expand_occurrences(db, schedules, start, end)
+    query = db.query(Schedule).filter(Schedule.active == True)  # noqa: E712
+    if channel in ("cable", "network"):
+        query = query.filter(Schedule.channel == channel)
+    return expand_occurrences(db, query.all(), start, end)
 
 
 @router.get("/next")
-def get_next_schedule(db: Session = Depends(get_db)):
+def get_next_schedule(channel: str | None = None, db: Session = Depends(get_db)):
     """
     Prochaine occurrence active à venir, récurrence et overrides résolus, pour
     le bloc « prochain cours » de l'écran d'attente (Lot 4, réf. UX2.1/UX2.5).
+    Filtrable par canal (chaque kiosk n'affiche que le planning de SON canal).
     """
     now = datetime.now(timezone.utc)
     horizon = now + timedelta(days=60)
-    schedules = db.query(Schedule).filter(Schedule.active == True).all()  # noqa: E712
+    query = db.query(Schedule).filter(Schedule.active == True)  # noqa: E712
+    if channel in ("cable", "network"):
+        query = query.filter(Schedule.channel == channel)
+    schedules = query.all()
     occurrences = expand_occurrences(db, schedules, now, horizon)
     upcoming = next((o for o in occurrences if o["override_action"] != OverrideAction.cancelled), None)
     if not upcoming:
@@ -192,7 +209,7 @@ def get_schedule(schedule_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=ScheduleResponse)
-def create_schedule(data: ScheduleInput, db: Session = Depends(get_db)):
+async def create_schedule(data: ScheduleInput, db: Session = Depends(get_db)):
     _check_target_exists(db, data.target_type, data.target_id)
     run_at, recurrence_rule = _validate_and_normalize(data)
 
@@ -203,18 +220,24 @@ def create_schedule(data: ScheduleInput, db: Session = Depends(get_db)):
         run_at=run_at,
         recurrence_rule=recurrence_rule,
         active=data.active,
+        channel=data.channel if data.channel in ("cable", "network") else "cable",
     )
     db.add(schedule)
     db.commit()
     db.refresh(schedule)
     sync_schedule_job(schedule)
+    # Réf. correctif "la modification d'un planning ne se propage qu'au worker
+    # qui a reçu la requête" : sync_schedule_job ci-dessus ne met à jour QUE
+    # l'AsyncIOScheduler de CE worker, broadcast_schedule_change relaie le
+    # changement aux 3 autres via Redis.
+    await broadcast_schedule_change(schedule.id)
     title, _ = resolve_target_title(db, schedule.target_type, schedule.target_id)
     log_activity(db, "schedule_created", f"{title or schedule.target_type.value} ({schedule.schedule_type.value})")
     return _to_response(db, schedule)
 
 
 @router.put("/{schedule_id}", response_model=ScheduleResponse)
-def update_schedule(schedule_id: int, data: ScheduleInput, db: Session = Depends(get_db)):
+async def update_schedule(schedule_id: int, data: ScheduleInput, db: Session = Depends(get_db)):
     schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Programmation non trouvée")
@@ -227,16 +250,18 @@ def update_schedule(schedule_id: int, data: ScheduleInput, db: Session = Depends
     schedule.run_at = run_at
     schedule.recurrence_rule = recurrence_rule
     schedule.active = data.active
+    schedule.channel = data.channel if data.channel in ("cable", "network") else "cable"
     db.commit()
     db.refresh(schedule)
     sync_schedule_job(schedule)
+    await broadcast_schedule_change(schedule.id)
     title, _ = resolve_target_title(db, schedule.target_type, schedule.target_id)
     log_activity(db, "schedule_updated", title or schedule.target_type.value)
     return _to_response(db, schedule)
 
 
 @router.delete("/{schedule_id}")
-def delete_schedule(schedule_id: int, db: Session = Depends(get_db)):
+async def delete_schedule(schedule_id: int, db: Session = Depends(get_db)):
     schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Programmation non trouvée")
@@ -244,6 +269,7 @@ def delete_schedule(schedule_id: int, db: Session = Depends(get_db)):
     db.delete(schedule)
     db.commit()
     remove_schedule_job(schedule_id)
+    await broadcast_schedule_change(schedule_id, removed=True)
     log_activity(db, "schedule_deleted", title or schedule.target_type.value)
     return {"message": "Programmation supprimée avec succès"}
 

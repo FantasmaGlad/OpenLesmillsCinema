@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.timer_manager import get_timer_manager, init_timer_manager
-from app.utils.ws_manager import ConnectionManager
+from app.utils.ws_manager import TIMER_REDIS_CHANNEL, ConnectionManager
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +11,10 @@ router = APIRouter(tags=["timer"])
 
 # Instance dédiée : le minuteur est indépendant de la lecture vidéo (Lot 3),
 # donc de son propre canal WebSocket plutôt que de partager celui du kiosk.
-timer_ws_manager = ConnectionManager()
+# Canal Redis dédié aussi : son écouteur est démarré dans le lifespan
+# (main.py), comme celui de la lecture — sans lui, aucun évènement minuteur
+# ne parvenait jamais aux clients (publication dans le vide).
+timer_ws_manager = ConnectionManager(channel=TIMER_REDIS_CHANNEL)
 timer_manager = init_timer_manager(timer_ws_manager.broadcast)
 
 

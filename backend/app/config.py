@@ -3,8 +3,8 @@ import tomllib
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
-# Repère du dossier racine de l'application
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+# Repère du dossier racine du backend de l'application (racine de backend/)
+ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
@@ -32,9 +32,18 @@ class Settings(BaseSettings):
     # Logs (Lot 9.6/13, réf. F8.2/F8.3) : dossier dédié, séparé des données média.
     logs_dir: str = "data/logs"
 
+    # Éditeur de canvas (Lot 12, réf. UX2.2) : logos/images importés pour les
+    # compositions attente/pause, dossier dédié séparé des autres médias.
+    canvas_assets_dir: str = "data/canvas_assets"
+
     # Mode audio coach (Lot 8, réf. F10.3/UX4.8) : réglage par défaut de la
     # minuterie entre pistes en mode "auto + minuterie".
     audio_chain_timer_seconds: int = 20
+
+    # Redis (bus d'état partagé entre workers uvicorn, réf. plan perf/concurrence
+    # Phase 1) : synchronisation du PlaybackManager et diffusion WebSocket
+    # inter-workers, verrou distribué pour les jobs planifiés.
+    redis_url: str = "redis://localhost:6379/0"
 
     # Réseau & Serveur
     host: str = "0.0.0.0"
@@ -42,7 +51,6 @@ class Settings(BaseSettings):
 
     # Paramètres de lecture par défaut
     wait_time_between_courses: int = 10
-    countdown_seconds: int = 5
     volume_default: int = 100
 
     class Config:
@@ -116,6 +124,7 @@ def load_settings() -> Settings:
         "audio_dir",
         "audio_watch_dir",
         "logs_dir",
+        "canvas_assets_dir",
     ]:
         path_str = getattr(settings, path_attr)
         path = Path(path_str)
@@ -137,7 +146,7 @@ def load_settings() -> Settings:
 # persistés dans la table `settings` (clé/valeur, cf. §7 cahier fonctionnel)
 # au lieu de config.toml : ils doivent survivre à un redémarrage (F7.3) sans
 # nécessiter de réécrire le fichier de config.
-_DB_OVERRIDABLE_FIELDS = ("countdown_seconds", "wait_time_between_courses", "volume_default", "audio_chain_timer_seconds")
+_DB_OVERRIDABLE_FIELDS = ("wait_time_between_courses", "volume_default", "audio_chain_timer_seconds")
 
 
 def _apply_db_overrides(settings: "Settings") -> None:
@@ -175,3 +184,11 @@ def _apply_db_overrides(settings: "Settings") -> None:
 
 
 settings = load_settings()
+
+
+def reload_settings() -> None:
+    global settings
+    new_settings = load_settings()
+    for field in settings.model_fields:
+        if hasattr(new_settings, field):
+            setattr(settings, field, getattr(new_settings, field))
