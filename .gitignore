@@ -10,13 +10,27 @@ frontend/out/
 
 # Données locales (vidéos, base, logs) - ne doivent jamais être versionnées
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
+*.log
 /videos/
 /logs/
 /data/
+backend/data/
 
 # Fichiers de test personnels (vidéos sources volumineuses)
 /VideoTest/
+
+# Outillage local (agents IA, éditeurs)
+.claude/
+.agents/
+.gemini/
+CLAUDE.md
+AGENTS.md
+.pytest_cache/
+.vscode/
+.idea/
 
 # Divers
 .DS_Store
