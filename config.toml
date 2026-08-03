@@ -14,5 +14,4 @@ port = 8000
 
 [playback]
 wait_time_between_courses = 10
-countdown_seconds = 5
 volume_default = 100
