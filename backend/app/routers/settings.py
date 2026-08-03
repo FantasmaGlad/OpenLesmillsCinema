@@ -1,29 +1,58 @@
+import asyncio
 import logging
+import subprocess
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import settings as runtime_settings
 from app.database import get_db
 from app.models import Setting
+from app.playback_manager import get_playback_manager
+from app.utils.activity_log import log_activity
+from app.utils.ws_manager import manager as ws_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
+# Noms exacts des unités systemd installées par install.sh (réf. audit
+# plan-corrections-bugs, point 4) — à garder synchronisés avec ce fichier.
+BACKEND_SERVICE_UNIT = "openlesmillscinema-backend.service"
+KIOSK_SERVICE_UNIT = "openlesmillscinema-kiosk.service"
+
 # Réglages ajustables depuis l'interface (réf. UX3.17), persistés dans la
 # table `settings` (clé/valeur) et reflétés immédiatement dans le singleton
 # `runtime_settings` en mémoire — le fichier config.toml reste la valeur de
 # secours au tout premier démarrage (avant toute modification via l'UI).
-_WRITABLE_NUMERIC_FIELDS = {"countdown_seconds", "wait_time_between_courses", "volume_default", "audio_chain_timer_seconds"}
+_WRITABLE_NUMERIC_FIELDS = {"wait_time_between_courses", "volume_default", "audio_chain_timer_seconds"}
 _WRITABLE_STRING_FIELDS = {"theme", "language"}
 _DEFAULTS = {"theme": "les-mills-sombre", "language": "fr"}
+# "les-mills-sombre" est la clé interne historique du thème "Sombre" (réf.
+# mission thèmes cinéma) — inchangée pour ne rien casser sur les
+# installations existantes, seul son libellé affiché change côté frontend.
+_VALID_THEMES = {"les-mills-sombre", "clair", "lune", "menthe", "automne", "hiver", "chili", "ciel", "orchidee", "taupe", "charbon"}
+
+# Sortie affichée par CANAL de diffusion (réf. mission "canaux de diffusion
+# précis") : "câblé" (l'écran physiquement connecté au Wyse, en 127.0.0.1) et
+# "réseau" (tout autre appareil du LAN qui ouvre /kiosk ou /cinema) sont
+# désormais deux réglages INDÉPENDANTS — l'admin peut par exemple laisser le
+# câblé en kiosk piloté pendant que le réseau bascule en libre-service
+# cinéma, ou l'inverse. "kiosk" par défaut sur les deux canaux. Persisté en
+# base sous deux clés distinctes : survit aux redémarrages.
+_DISPLAY_OUTPUT_KEYS = {"cable": "display_output_cable", "network": "display_output_network"}
+_DISPLAY_OUTPUTS = ("kiosk", "cinema")
+_DISPLAY_CHANNELS = ("cable", "network")
+
+
+class DisplayOutputUpdate(BaseModel):
+    channel: str
+    output: str
 
 
 class SettingsUpdate(BaseModel):
-    countdown_seconds: int | None = None
     wait_time_between_courses: int | None = None
     volume_default: int | None = None
     audio_chain_timer_seconds: int | None = None
@@ -41,7 +70,6 @@ def get_settings(db: Session = Depends(get_db)) -> dict[str, Any]:
     theme = _get_db_value(db, "theme") or _DEFAULTS["theme"]
     language = _get_db_value(db, "language") or _DEFAULTS["language"]
     return {
-        "countdown_seconds": runtime_settings.countdown_seconds,
         "wait_time_between_courses": runtime_settings.wait_time_between_courses,
         "volume_default": runtime_settings.volume_default,
         "audio_chain_timer_seconds": runtime_settings.audio_chain_timer_seconds,
@@ -62,7 +90,7 @@ def get_settings(db: Session = Depends(get_db)) -> dict[str, Any]:
 
 
 @router.put("")
-def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="Aucun paramètre fourni")
@@ -74,6 +102,8 @@ def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db)) -> d
         elif key in _WRITABLE_STRING_FIELDS and value is not None:
             if key == "language" and value not in ("fr", "en"):
                 raise HTTPException(status_code=400, detail="Langue invalide (attendu 'fr' ou 'en')")
+            if key == "theme" and value not in _VALID_THEMES:
+                raise HTTPException(status_code=400, detail=f"Thème invalide (attendu l'un de : {', '.join(sorted(_VALID_THEMES))})")
 
         row = db.query(Setting).filter(Setting.key == key).first()
         if row:
@@ -90,4 +120,129 @@ def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db)) -> d
 
     db.commit()
     logger.info(f"Paramètres mis à jour : {updates}")
-    return get_settings(db)
+    result = get_settings(db)
+
+    # Diffusion temps réel (correctif "thème ne se synchronise pas sur
+    # l'écran cinéma") : AppSettingsProvider ne chargeait le thème/langue
+    # qu'une fois au montage — un changement décidé depuis l'admin pendant
+    # que /cinema ou un autre écran était déjà ouvert n'y apparaissait donc
+    # jamais sans rechargement manuel. Diffusé uniquement si l'un des deux a
+    # effectivement changé, pour ne pas générer de trafic WebSocket inutile
+    # à chaque réglage numérique (countdown, volume...).
+    if "theme" in updates or "language" in updates:
+        await ws_manager.broadcast({
+            "event": "settings_change",
+            "theme": result["theme"],
+            "language": result["language"],
+        })
+
+    return result
+
+
+def get_display_output_value(db: Session, channel: str = "cable") -> str:
+    """Valeur de sortie active pour un canal, réutilisable hors endpoint
+    (réf. verrouillage cinéma dans routers/playback.py)."""
+    value = _get_db_value(db, _DISPLAY_OUTPUT_KEYS[channel])
+    return value if value in _DISPLAY_OUTPUTS else "kiosk"
+
+
+@router.get("/display-output")
+def get_display_output(db: Session = Depends(get_db)) -> dict[str, str]:
+    """Sortie active des deux canaux : câblé (écran du Wyse) et réseau (tout
+    autre appareil du LAN)."""
+    return {
+        "cable": get_display_output_value(db, "cable"),
+        "network": get_display_output_value(db, "network"),
+    }
+
+
+@router.put("/display-output")
+async def set_display_output(payload: DisplayOutputUpdate, db: Session = Depends(get_db)) -> dict[str, str]:
+    """
+    Bascule un canal (câblé ou réseau) entre kiosk et cinéma, indépendamment
+    de l'autre. L'application est instantanée : l'évènement est diffusé à
+    tous les clients WebSocket, et la page concernée (l'écran câblé pour le
+    canal "cable", tout autre /kiosk ou /cinema du réseau pour "network")
+    navigue d'elle-même vers l'autre page en le recevant.
+    """
+    if payload.channel not in _DISPLAY_CHANNELS:
+        raise HTTPException(status_code=400, detail="Canal invalide (attendu 'cable' ou 'network')")
+    if payload.output not in _DISPLAY_OUTPUTS:
+        raise HTTPException(status_code=400, detail="Sortie invalide (attendu 'kiosk' ou 'cinema')")
+
+    key = _DISPLAY_OUTPUT_KEYS[payload.channel]
+    row = db.query(Setting).filter(Setting.key == key).first()
+    if row:
+        row.value = payload.output
+    else:
+        db.add(Setting(key=key, value=payload.output))
+    db.commit()
+
+    # Bascule vers cinéma : coupe ce qui jouait côté kiosk sur CE canal plutôt
+    # que de le laisser tourner en arrière-plan sans écran pour l'afficher —
+    # sans ça l'état serveur restait "en cours" (position qui continue
+    # d'avancer, "En direct" affiché côté admin) et pouvait reprendre en
+    # l'état si on rebasculait sur kiosk plus tard, en conflit avec ce que
+    # l'utilisateur regarde alors en cinéma (réf. retour utilisateur
+    # "couper et retirer la vidéo qui se jouait sur le kiosk").
+    if payload.output == "cinema":
+        manager = get_playback_manager(payload.channel)
+        current = manager.snapshot()
+        if current["current_video"] or current["current_background"] or current["current_audio_course"]:
+            title = (
+                (current["current_video"] or {}).get("title")
+                or (current["current_background"] or {}).get("title")
+                or (current["current_audio_course"] or {}).get("title")
+            )
+            log_activity(db, "playback_stopped", title)
+        await manager.stop()
+
+    await ws_manager.broadcast({"event": "display_output", "channel": payload.channel, "output": payload.output})
+    logger.info(f"Sortie {payload.channel} basculée sur /{payload.output}")
+    return {
+        "cable": get_display_output_value(db, "cable"),
+        "network": get_display_output_value(db, "network"),
+    }
+
+
+async def _run_full_reset():
+    """
+    Diffuse un rechargement à tous les navigateurs connectés (PC/mobile/coach)
+    puis redémarre le service kiosk (relance Chromium) et enfin le service
+    backend (réf. audit plan-corrections-bugs, point 4 — bouton de
+    réinitialisation complète). Exécuté en tâche de fond APRÈS l'envoi de la
+    réponse HTTP : le redémarrage du backend termine le processus courant, il
+    ne peut donc pas avoir lieu pendant le traitement de la requête elle-même.
+
+    Hors de l'environnement cible (règle sudoers/unités systemd installées par
+    install.sh absentes, ex. poste de dev), les appels `systemctl` échouent
+    proprement et sont juste loggés — seule la diffusion `force_reload` a un
+    effet observable en dev.
+    """
+    try:
+        await ws_manager.broadcast_force_reload()
+    except Exception as e:
+        logger.warning(f"Échec de la diffusion force_reload : {e}")
+
+    # Laisse le temps au message de partir avant de couper les connexions.
+    await asyncio.sleep(1.0)
+
+    for unit in (KIOSK_SERVICE_UNIT, BACKEND_SERVICE_UNIT):
+        try:
+            subprocess.run(["sudo", "systemctl", "restart", unit], check=True, timeout=15)
+            logger.info(f"Service {unit} redémarré (réinitialisation complète)")
+        except Exception as e:
+            logger.error(f"Échec du redémarrage de {unit} (hors environnement cible ?) : {e}")
+
+
+@router.post("/system/reset")
+async def reset_system(background_tasks: BackgroundTasks) -> dict[str, str]:
+    """
+    Réinitialisation complète (réf. audit plan-corrections-bugs, point 4) :
+    force le rechargement de tous les écrans connectés puis redémarre le
+    kiosk et le backend. Action volontairement lourde/perturbatrice — le
+    bouton correspondant côté UI doit demander confirmation avant d'appeler
+    cet endpoint.
+    """
+    background_tasks.add_task(_run_full_reset)
+    return {"message": "Réinitialisation en cours : tous les écrans vont se recharger."}

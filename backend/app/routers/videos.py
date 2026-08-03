@@ -13,7 +13,6 @@ from fastapi import (
     File,
     Form,
     HTTPException,
-    BackgroundTasks,
 )
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -22,6 +21,8 @@ from app.database import get_db, SessionLocal
 from app.models import Video, ImportSource
 from app.config import settings
 from app.utils.importer import import_video
+from app.utils.executors import ffmpeg_executor
+from app.utils.import_jobs import create_job, update_job
 from app.utils.video_utils import (
     extract_metadata,
     check_compatibility,
@@ -57,44 +58,78 @@ class VideoResponse(BaseModel):
         from_attributes = True
 
 
-@router.post("/upload", response_model=VideoResponse)
+class ImportJobAccepted(BaseModel):
+    job_id: str
+
+
+def _run_video_import_job(
+    job_id: str,
+    temp_path: str,
+    filename: str,
+    title: str | None,
+    program: str | None,
+    release: str | None,
+) -> None:
+    """
+    Exécutée sur `ffmpeg_executor` (réf. audit plan-corrections-bugs, point
+    5 : un seul ffmpeg à la fois, y compris avec le dossier surveillé).
+    Contrairement à l'ancienne implémentation synchrone, la requête HTTP
+    d'upload ne bloque plus jusqu'à la fin de cette fonction (qui peut
+    prendre jusqu'à FFMPEG_NORMALIZE_TIMEOUT_SECONDS = 30 min) — elle est
+    seulement mise en file, et son avancement est visible via
+    `app.utils.import_jobs` / `GET /api/import-jobs` (réf. mission "voir en
+    direct les importations").
+    """
+    try:
+        video = import_video(temp_path, filename, ImportSource.upload, job_id=job_id)
+
+        db = SessionLocal()
+        try:
+            db_video = db.query(Video).filter(Video.id == video.id).first()
+            if db_video:
+                if title:
+                    db_video.title = title
+                if program:
+                    db_video.program = program
+                if release:
+                    db_video.release = release
+                db.commit()
+                result_id = db_video.id
+            else:
+                result_id = video.id
+        finally:
+            db.close()
+
+        update_job(job_id, stage="done", result_id=result_id)
+    except Exception as e:
+        logger.error(f"Erreur lors de l'upload et de l'import de la vidéo (job {job_id}): {e}", exc_info=True)
+        update_job(job_id, stage="error", error=str(e))
+
+
+@router.post("/upload", response_model=ImportJobAccepted, status_code=202)
 def upload_video(
     file: UploadFile = File(...),
     title: str | None = Form(None),
     program: str | None = Form(None),
     release: str | None = Form(None),
-    db: Session = Depends(get_db),
 ):
     """
-    Upload une vidéo en HTTP, l'enregistre sur disque et l'indexe (avec normalisation automatique si requise).
+    Upload une vidéo en HTTP et enregistre une tâche d'import suivie en
+    arrière-plan (normalisation automatique si requise) — voir
+    `_run_video_import_job` et `GET /api/import-jobs`.
     """
     suffix = Path(file.filename).suffix.lower()
-    # Créer un fichier temporaire pour stocker l'upload
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             shutil.copyfileobj(file.file, temp_file)
             temp_path = temp_file.name
-
-        # Traiter et importer le fichier vidéo
-        video = import_video(temp_path, file.filename, ImportSource.upload)
-
-        # Mettre à jour avec les métadonnées fournies par le formulaire si présentes
-        db_video = db.query(Video).filter(Video.id == video.id).first()
-        if db_video:
-            if title:
-                db_video.title = title
-            if program:
-                db_video.program = program
-            if release:
-                db_video.release = release
-            db.commit()
-            db.refresh(db_video)
-            return db_video
-
-        return video
     except Exception as e:
-        logger.error(f"Erreur lors de l'upload et de l'import de la vidéo: {e}", exc_info=True)
+        logger.error(f"Erreur lors de la réception de l'upload vidéo: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
+
+    job_id = create_job("video", file.filename, title or Path(file.filename).stem)
+    ffmpeg_executor.submit(_run_video_import_job, job_id, temp_path, file.filename, title, program, release)
+    return {"job_id": job_id}
 
 
 @router.get("", response_model=List[VideoResponse])
@@ -228,9 +263,14 @@ def delete_video(video_id: int, db: Session = Depends(get_db)):
     return {"message": "Vidéo supprimée avec succès"}
 
 
-def bg_normalize(video_id: int, actions: list):
+def bg_normalize(video_id: int, actions: list, source_metadata: dict | None = None):
     """
     Tâche en arrière-plan pour normaliser une vidéo existante de manière asynchrone.
+
+    `source_metadata` (réf. correctif "appel ffprobe redondant") : l'appelant
+    (manual_normalize) a déjà extrait les métadonnées de ce même fichier pour
+    décider des `actions` — inutile de relancer ffprobe dessus une seconde
+    fois avant même de le déplacer vers son emplacement temporaire.
     """
     db = SessionLocal()
     try:
@@ -251,7 +291,7 @@ def bg_normalize(video_id: int, actions: list):
         new_path = old_path.parent / new_name
 
         try:
-            normalize_video(str(temp_dest_path), str(new_path), actions)
+            normalize_video(str(temp_dest_path), str(new_path), actions, source_metadata=source_metadata)
 
             # Re-extraction des métadonnées finales
             meta = extract_metadata(str(new_path))
@@ -293,7 +333,6 @@ def bg_normalize(video_id: int, actions: list):
 @router.post("/{video_id}/normalize")
 def manual_normalize(
     video_id: int,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """
@@ -313,5 +352,14 @@ def manual_normalize(
     if not compat["needs_normalization"]:
         return {"message": "La vidéo est déjà compatible Direct Play, aucune action requise."}
 
-    background_tasks.add_task(bg_normalize, video_id, compat["actions"])
+    # ffmpeg_executor (mono-thread, partagé avec l'import upload/watcher) plutôt
+    # que BackgroundTasks (réf. correctif "la normalisation manuelle contourne
+    # l'exécuteur ffmpeg partagé") : BackgroundTasks exécute une fonction sync
+    # sur le pool de threads générique de Starlette, PAS sur notre exécuteur
+    # dédié — un import en cours au même moment lançait donc un second ffmpeg
+    # en parallèle, doublant la charge CPU sur le Wyse. submit() sans .result()
+    # garde ce déclenchement non bloquant pour la réponse HTTP (la tâche
+    # patiente dans la file de l'exécuteur si celui-ci est déjà occupé,
+    # plutôt que de démarrer un second processus ffmpeg en parallèle).
+    ffmpeg_executor.submit(bg_normalize, video_id, compat["actions"], meta)
     return {"message": "La tâche de normalisation a été démarrée en tâche de fond."}
