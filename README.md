@@ -13,11 +13,10 @@ Ce document est écrit pour quiconque souhaite **comprendre, exploiter, modifier
 3. [Modèle de données & Persistance SQLite](#3-modèle-de-données--persistance-sqlite)
 4. [Canaux de diffusion & Gestionnaire de lecture](#4-canaux-de-diffusion--gestionnaire-de-lecture)
 5. [Mode Audio Coach & Fonds animés](#5-mode-audio-coach--fonds-animés)
-6. [Éditeur de composition Canvas](#6-éditeur-de-composition-canvas)
-7. [Script d'installation & Services systemd](#7-script-dinstallation--services-systemd)
-8. [Référence API HTTP & WebSockets](#8-référence-api-http--websockets)
-9. [Exploitation & Découverte Réseau (Wyse)](#9-exploitation--découverte-réseau-wyse)
-10. [Licence](#10-licence)
+6. [Script d'installation & Services systemd](#6-script-dinstallation--services-systemd)
+7. [Référence API HTTP & WebSockets](#7-référence-api-http--websockets)
+8. [Exploitation & Découverte Réseau (Wyse)](#8-exploitation--découverte-réseau-wyse)
+9. [Licence](#9-licence)
 
 ---
 
@@ -104,7 +103,7 @@ Le backend tourne en plusieurs workers `uvicorn` sous le même processus maître
 - `timer_manager.py` : Minuteur de décompte inter-cours et enchaînement audio coach.
 - `models.py` : Déclarations SQLAlchemy ORM.
 - `config.py` : Gestionnaire de configuration dynamique.
-- `routers/` : Endpoints HTTP groupés par domaine (`videos`, `playlists`, `audio_playlists`, `schedule`, `playback`, `canvas`, `settings`, `logs`, `import_jobs`).
+- `routers/` : Endpoints HTTP groupés par domaine (`videos`, `playlists`, `audio_playlists`, `schedule`, `playback`, `settings`, `logs`, `import_jobs`).
 
 ---
 
@@ -120,7 +119,6 @@ Le schéma de données est géré par **SQLAlchemy** et migré via **Alembic**. 
 - `audio_playlists` & `audio_playlist_items` : Éditions mixées audio coach avec attribution de fond visuel par piste.
 - `schedules` & `schedule_overrides` : Programmations récurrentes ou ponctuelles, avec gestion des exceptions d'occurrences (annulation, remplacement).
 - `playback_state` : État de lecture persisté par canal (*Câblé* et *Réseau*), incluant la sauvegarde des actions interrompues pour la reprise automatique.
-- `canvas_layouts` : Mises en page dynamiques des écrans d'attente et de pause (positions, textes, couleurs, logos).
 - `settings` : Clés/valeurs des paramètres modifiables à chaud depuis l'interface admin.
 - `activity_log` : Journal des événements fonctionnels et techniques du système.
 
@@ -152,17 +150,7 @@ Le mode **Audio Coach** permet de diffuser des cours audio (pistes vocales / mus
 
 ---
 
-## 6. Éditeur de composition Canvas
-
-Le système inclut un moteur de composition visuelle (`/api/canvas`) permettant de personnaliser l'affichage des écrans de veille, d'attente et de pause.
-
-- **Frontend** : Composants React dédiés (`CanvasRenderer.tsx`, `CanvasElementView.tsx`).
-- **Éléments supportés** : Textes stylisés, logos, vignettes du cours suivant, horloge dynamique, minuteur inter-cours.
-- **Sauvegarde** : Layouts stockés en base SQLite sous format JSON structuré.
-
----
-
-## 7. Script d'installation & Services systemd
+## 6. Script d'installation & Services systemd
 
 L'installation de production s'effectue via le script shell idempotent `install.sh` sur Debian 13 (Trixie).
 
@@ -190,7 +178,7 @@ sudo ./install.sh
 
 ---
 
-## 8. Référence API HTTP & WebSockets
+## 7. Référence API HTTP & WebSockets
 
 ### Endpoints HTTP (`/api`)
 
@@ -204,7 +192,6 @@ sudo ./install.sh
 | **Planning** | `/api/schedule` | Programmateurs, occurrences et exceptions |
 | **Lecture** | `/api/playback` | Contrôle de la lecture (play, pause, seek, stop, reprise) |
 | **Minuteur** | `/api/timer` | État et contrôle du décompte inter-cours |
-| **Canvas** | `/api/canvas` | Éditeur de composition visuelle |
 | **Paramètres** | `/api/settings` | Configuration dynamique du système et de la sortie vidéo |
 | **Imports** | `/api/import-jobs` | Suivi des tâches d'importation en arrière-plan |
 | **Logs** | `/api/logs` | Consultation et téléchargement des journaux système |
@@ -216,7 +203,7 @@ sudo ./install.sh
 
 ---
 
-## 9. Exploitation & Découverte Réseau (Wyse)
+## 8. Exploitation & Découverte Réseau (Wyse)
 
 Sur le réseau local, la machine Wyse de production (`pavilion-malefique` / Dell Wyse 5070) reçoit son adresse IP via **DHCP**.
 
@@ -245,6 +232,6 @@ ssh fanta@<WYSE_IP> "cd /home/fanta/OpenLesmillsCinema && git pull && sudo ./ins
 
 ---
 
-## 10. Licence
+## 9. Licence
 
-Ce projet est sous licence privée/propriétaire. Tous droits réservés.
+Ce projet est distribué sous licence Open Source **MIT**.
