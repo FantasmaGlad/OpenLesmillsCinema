@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import os
+import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -86,6 +89,91 @@ def get_settings(db: Session = Depends(get_db)) -> dict[str, Any]:
             "audio_dir": runtime_settings.audio_dir,
             "audio_watch_dir": runtime_settings.audio_watch_dir,
         },
+    }
+
+
+# Dossiers de médias dont on additionne l'empreinte disque pour l'indicateur
+# de stockage (réf. mission "un indicateur de la quantité de stockage restant
+# pour monitorer la capacité de l'application") : ce que l'application
+# consomme réellement, cours + fonds + audio + vignettes + logs + dossiers
+# surveillés. Les chemins sont déjà résolus en absolu par app.config.
+_STORAGE_TRACKED_DIRS = (
+    "media_dir",
+    "watch_dir",
+    "thumbnails_dir",
+    "backgrounds_dir",
+    "backgrounds_watch_dir",
+    "audio_dir",
+    "audio_watch_dir",
+    "canvas_assets_dir",
+    "logs_dir",
+)
+
+
+def _dir_size(path: Path) -> int:
+    """Taille cumulée d'un dossier (récursif), tolérante aux erreurs d'accès
+    et aux liens symboliques (non suivis, pour ne pas compter deux fois ni
+    boucler). Renvoie 0 si le dossier n'existe pas encore."""
+    total = 0
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                try:
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_file(follow_symlinks=False):
+                        total += entry.stat(follow_symlinks=False).st_size
+                    elif entry.is_dir(follow_symlinks=False):
+                        total += _dir_size(Path(entry.path))
+                except OSError:
+                    continue
+    except (FileNotFoundError, NotADirectoryError, PermissionError):
+        return 0
+    return total
+
+
+@router.get("/storage")
+def get_storage() -> dict[str, Any]:
+    """
+    Indicateur de capacité de stockage (réf. mission "monitorer la capacité de
+    l'application") : espace disque du volume qui héberge les médias (total /
+    utilisé / libre) et empreinte propre de l'application (somme des dossiers
+    de médias). Permet à l'admin de voir combien de cours/fonds/audio il peut
+    encore importer avant de saturer le disque du Wyse.
+    """
+    media_dir = Path(runtime_settings.media_dir)
+    # Volume mesuré : le dossier des médias s'il existe, sinon son parent
+    # (tout premier démarrage, avant le premier import) — jamais un chemin
+    # inexistant qui ferait échouer shutil.disk_usage.
+    probe = media_dir
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        usage = shutil.disk_usage(probe)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Impossible de lire l'espace disque : {e}")
+
+    app_bytes = 0
+    seen: set[str] = set()
+    for attr in _STORAGE_TRACKED_DIRS:
+        raw = getattr(runtime_settings, attr, None)
+        if not raw:
+            continue
+        # Dédoublonnage : plusieurs réglages peuvent pointer le même dossier
+        # (ou un sous-dossier) — on ne compte chaque chemin racine qu'une fois.
+        resolved = str(Path(raw))
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        app_bytes += _dir_size(Path(raw))
+
+    return {
+        "total_bytes": usage.total,
+        "used_bytes": usage.used,
+        "free_bytes": usage.free,
+        "used_percent": round(usage.used / usage.total * 100, 1) if usage.total else 0.0,
+        "app_bytes": app_bytes,
+        "path": str(probe),
     }
 
 

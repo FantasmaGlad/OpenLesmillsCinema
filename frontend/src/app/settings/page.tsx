@@ -11,6 +11,25 @@ interface SettingsData {
   paths: Record<string, string>;
 }
 
+interface StorageData {
+  total_bytes: number;
+  used_bytes: number;
+  free_bytes: number;
+  used_percent: number;
+  app_bytes: number;
+  path: string;
+}
+
+/** Octets -> unité lisible (Go/Mo…), base 1024, réf. mission "indicateur de
+ * la quantité de stockage restant pour monitorer la capacité". */
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes < 0) return "0 o";
+  const units = ["o", "Ko", "Mo", "Go", "To"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  const value = bytes / Math.pow(1024, i);
+  return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
 interface ToastState {
   message: string;
   type: "success" | "error" | "warning";
@@ -54,6 +73,7 @@ const PATH_LABEL_KEYS: Record<string, string> = {
 export default function SettingsPage() {
   const { theme, language, setTheme, setLanguage, t } = useAppSettings();
   const [data, setData] = useState<SettingsData | null>(null);
+  const [storage, setStorage] = useState<StorageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -74,6 +94,29 @@ export default function SettingsPage() {
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
+  }, []);
+
+  // Indicateur de stockage (réf. mission "monitorer la capacité de
+  // l'application") : rafraîchi toutes les 30 s pour refléter les imports en
+  // cours sans avoir à recharger la page.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchStorage = () => {
+      fetch(getApiUrl("/settings/storage"), { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((d) => {
+          if (!cancelled) setStorage(d);
+        })
+        .catch(() => {
+          if (!cancelled) setStorage(null);
+        });
+    };
+    fetchStorage();
+    const id = setInterval(fetchStorage, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -263,6 +306,68 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      <div className="live-block">
+        <h3>{t("settingsPage.storageSection")}</h3>
+        {storage ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px" }}>
+              <span style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--text-main)" }}>
+                {t("settingsPage.storageFreeOfTotal", {
+                  free: formatBytes(storage.free_bytes),
+                  total: formatBytes(storage.total_bytes),
+                })}
+              </span>
+              <span
+                style={{
+                  fontSize: "0.85rem",
+                  fontWeight: 700,
+                  fontVariantNumeric: "tabular-nums",
+                  color:
+                    storage.used_percent >= 90
+                      ? "var(--accent-error)"
+                      : storage.used_percent >= 75
+                      ? "#f59e0b"
+                      : "var(--text-muted)",
+                }}
+              >
+                {t("settingsPage.storageUsedPercent", { percent: storage.used_percent })}
+              </span>
+            </div>
+            <div
+              style={{
+                height: "10px",
+                borderRadius: "999px",
+                background: "var(--bg-surface-hover)",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width: `${Math.min(100, storage.used_percent)}%`,
+                  height: "100%",
+                  borderRadius: "999px",
+                  transition: "width 0.4s ease",
+                  background:
+                    storage.used_percent >= 90
+                      ? "var(--accent-error)"
+                      : storage.used_percent >= 75
+                      ? "#f59e0b"
+                      : "var(--accent-primary)",
+                }}
+              />
+            </div>
+            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+              {t("settingsPage.storageApp", { app: formatBytes(storage.app_bytes) })}
+            </span>
+            <p style={{ fontSize: "0.75rem", color: "var(--text-dim)", margin: 0 }}>
+              {t("settingsPage.storageHint")}
+            </p>
+          </div>
+        ) : (
+          <p className="live-empty">{t("settingsPage.storageError")}</p>
+        )}
+      </div>
 
       <div className="live-block">
         <h3>{t("settingsPage.pathsSection")}</h3>

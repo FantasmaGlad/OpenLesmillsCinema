@@ -354,19 +354,40 @@ class PlaybackManager:
         lock_key = f"tick:playlist_waiting:{self.channel}"
         try:
             remaining = self.state["playlist_waiting_remaining"] or 0.0
+            # Vrai dès que CE worker a lui-même décompté jusqu'à 0 : c'est lui
+            # qui enchaîne la vidéo suivante, SANS re-tenter le verrou de tick
+            # (correctif "playlist bloquée sur 0") — son propre verrou du
+            # dernier tick est encore valide, le re-prendre échouerait et
+            # _play_next_video ne serait jamais appelé (la playlist restait
+            # figée sur « 0 » sans jamais lancer le cours suivant).
+            advanced_here = False
             while remaining > 0:
                 await asyncio.sleep(1.0)
                 if self._waiting_task is not this_task:
                     return
-                if not await acquire_tick_lock(lock_key, ttl_ms=1200):
+                # TTL du verrou volontairement INFÉRIEUR à l'intervalle d'un
+                # tick (1 s) — correctif "le décompte ne dure pas 1 s par
+                # seconde" : au repos un seul worker décompte, et il doit
+                # pouvoir re-prendre SON PROPRE verrou à chaque seconde. Un TTL
+                # ≥ 1 s (précédemment 1200 ms) le faisait entrer en collision
+                # avec lui-même — son verrou de la seconde précédente n'avait
+                # pas encore expiré — d'où un décompte deux fois trop lent
+                # (une décrémentation une seconde sur deux). 800 ms reste assez
+                # long pour bloquer un SECOND worker concurrent au sein du même
+                # tick (cas rare d'une reprise après crash).
+                if not await acquire_tick_lock(lock_key, ttl_ms=800):
                     continue
                 remaining -= 1.0
                 self.state["playlist_waiting_remaining"] = max(0.0, remaining)
                 await self._emit("playlist_waiting_tick")
+                if remaining <= 0:
+                    advanced_here = True
 
             if self._waiting_task is not this_task:
                 return
-            if not await acquire_tick_lock(lock_key, ttl_ms=1200):
+            # Cas wait_time == 0 (boucle jamais entrée) : personne n'a décompté,
+            # on prend le verrou pour dédoublonner l'enchaînement entre workers.
+            if not advanced_here and not await acquire_tick_lock(lock_key, ttl_ms=800):
                 return
             # Temps d'attente écoulé : lance la vidéo suivante
             await self._play_next_video()
@@ -752,14 +773,20 @@ class PlaybackManager:
         lock_key = f"tick:audio_chain_wait:{self.channel}"
         try:
             remaining = self.state["audio_chain_wait_remaining"] or 0.0
+            # Même correctif que _run_waiting_period (verrou en collision avec
+            # lui-même à TTL ≥ 1 s, et re-tentative finale qui échouait) : TTL
+            # abaissé à 800 ms + drapeau du worker qui a atteint 0 lui-même.
+            advanced_here = False
             while remaining > 0:
                 await asyncio.sleep(1.0)
-                if not await acquire_tick_lock(lock_key, ttl_ms=1200):
+                if not await acquire_tick_lock(lock_key, ttl_ms=800):
                     continue
                 remaining -= 1.0
                 self.state["audio_chain_wait_remaining"] = max(0.0, remaining)
                 await self._emit("audio_chain_wait_tick")
-            if not await acquire_tick_lock(lock_key, ttl_ms=1200):
+                if remaining <= 0:
+                    advanced_here = True
+            if not advanced_here and not await acquire_tick_lock(lock_key, ttl_ms=800):
                 return
             self.state["audio_chain_wait_remaining"] = None
             idx = self.state["audio_track_index"]

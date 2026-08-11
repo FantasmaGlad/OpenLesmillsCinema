@@ -135,8 +135,10 @@ class TestPlaylistFlow(unittest.IsolatedAsyncioTestCase):
         ]
         await manager.load_playlist(pl["id"], pl["name"], items_data)
         
-        # Check initial state: should start countdown for first video
-        self.assertEqual(manager.state["state"], "countdown")
+        # Check initial state: bascule directe en lecture du premier cours
+        # (le pacing du lancement est désormais l'animation Lancement.mp4 côté
+        # kiosk, plus d'état serveur "countdown" intermédiaire).
+        self.assertEqual(manager.state["state"], "playing")
         self.assertEqual(manager.state["current_video"]["id"], self.video1.id)
         self.assertEqual(manager.state["playlist_name"], "Flow Playlist")
         self.assertEqual(manager.state["playlist_index"], 0)
@@ -170,6 +172,56 @@ class TestPlaylistFlow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.state["state"], "waiting")
         self.assertIsNone(manager.state["current_video"])
         self.assertIsNone(manager.state["playlist_name"])
+
+    async def test_playlist_waiting_period_auto_advances(self):
+        """Correctifs "playlist bloquée sur 0" et "le décompte ne dure pas 1 s
+        par seconde" : au lieu de contourner l'attente via skip_waiting (ce que
+        fait le test ci-dessus), on laisse la tâche _run_waiting_period se
+        dérouler RÉELLEMENT et on vérifie qu'elle décompte à ~1 s/tick puis
+        enchaîne toute seule le cours suivant — sans rester figée sur « 0 »."""
+        import time as _time
+
+        item1 = PlaylistItemInput(video_id=self.video1.id, position=0)
+        item2 = PlaylistItemInput(video_id=self.video2.id, position=1)
+        payload = PlaylistInput(name="Auto-advance Playlist", items=[item1, item2])
+        pl = create_playlist(payload, self.db)
+
+        ticks = []
+
+        async def mock_broadcast(data):
+            if data.get("cause") == "playlist_waiting_tick":
+                ticks.append(data["data"]["playlist_waiting_remaining"])
+
+        manager = PlaybackManager(mock_broadcast)
+        items_data = [
+            {"id": self.video1.id, "title": self.video1.title, "duration_seconds": self.video1.duration_seconds, "program": self.video1.program},
+            {"id": self.video2.id, "title": self.video2.title, "duration_seconds": self.video2.duration_seconds, "program": self.video2.program},
+        ]
+        await manager.load_playlist(pl["id"], pl["name"], items_data)
+        manager.state["state"] = "playing"
+
+        # Attente courte pour un test rapide mais assez longue pour distinguer
+        # un décompte 1 s/tick (~2 s) d'un décompte 2× trop lent (~4 s).
+        original_wait = settings.wait_time_between_courses
+        settings.wait_time_between_courses = 2
+        try:
+            start = _time.monotonic()
+            await manager.video_ended()
+            self.assertEqual(manager.state["state"], "playlist_waiting")
+            # Laisse la vraie tâche d'attente se dérouler jusqu'à l'enchaînement.
+            await asyncio.wait_for(manager._waiting_task, timeout=8)
+            elapsed = _time.monotonic() - start
+        finally:
+            settings.wait_time_between_courses = original_wait
+
+        # Correctif "bloquée sur 0" : le cours suivant a bien été lancé.
+        self.assertEqual(manager.state["state"], "playing")
+        self.assertEqual(manager.state["current_video"]["id"], self.video2.id)
+        self.assertEqual(manager.state["playlist_index"], 1)
+        # Correctif vitesse : 2 s d'attente doivent prendre ~2 s réelles, pas ~4.
+        self.assertLess(elapsed, 3.6, f"Décompte trop lent ({elapsed:.1f}s pour 2s d'attente)")
+        # Le décompte est bien passé par 0 (dernier tick émis).
+        self.assertIn(0.0, ticks)
 
 
 if __name__ == "__main__":

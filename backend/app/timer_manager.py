@@ -207,16 +207,24 @@ class TimerManager:
         # de leur côté.
         lock_key = "tick:timer:countdown"
         try:
+            # TTL du verrou < intervalle de tick (1 s) et drapeau du worker qui
+            # atteint 0 : même correctif que PlaybackMan._run_waiting_period —
+            # un TTL ≥ 1 s faisait entrer le worker en collision avec son propre
+            # verrou (décompte serveur 2× trop lent) et la re-tentative finale
+            # échouait, si bien que l'évènement "end" ne partait jamais.
+            ended_here = False
             while self.state["running"] and (self.state["remaining_seconds"] or 0) > 0:
                 await asyncio.sleep(1.0)
                 if not self.state["running"]:
                     return
-                if not await acquire_tick_lock(lock_key, ttl_ms=1200):
+                if not await acquire_tick_lock(lock_key, ttl_ms=800):
                     continue
                 self.state["remaining_seconds"] = max(0.0, self.state["remaining_seconds"] - 1.0)
                 await self._emit("tick")
+                if self.state["remaining_seconds"] == 0:
+                    ended_here = True
             if self.state["running"] and self.state["remaining_seconds"] == 0:
-                if not await acquire_tick_lock(lock_key, ttl_ms=1200):
+                if not ended_here and not await acquire_tick_lock(lock_key, ttl_ms=800):
                     return
                 self.state["running"] = False
                 self.state["ended"] = True
@@ -231,7 +239,9 @@ class TimerManager:
                 await asyncio.sleep(1.0)
                 if not self.state["running"]:
                     return
-                if not await acquire_tick_lock(lock_key, ttl_ms=1200):
+                # TTL < 1 s : cf. _run_countdown, sinon le worker se bloque sur
+                # son propre verrou et le compteur monte 2× trop lentement.
+                if not await acquire_tick_lock(lock_key, ttl_ms=800):
                     continue
                 self.state["elapsed_seconds"] = (self.state["elapsed_seconds"] or 0.0) + 1.0
                 await self._emit("tick")
