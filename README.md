@@ -93,17 +93,16 @@ La configuration est chargée selon l'ordre de priorité suivant :
                                                            └──────────────┘
 ```
 
-Le backend tourne en plusieurs workers `uvicorn` sous le même processus maître. Redis sert de **bus d'état partagé** (position de lecture, minuteurs, verrous de tick `tick_lock.py`, synchronisation de planning) et de canal de diffusion Pub/Sub pour les WebSockets. Un client web reste parfaitement synchronisé quel que soit le worker traitant la requête HTTP.
+Le backend tourne en plusieurs workers `uvicorn` sous le même processus maître. Redis sert de **bus d'état partagé** (position de lecture, décompte inter-cours, verrous de tick `tick_lock.py`, synchronisation de planning) et de canal de diffusion Pub/Sub pour les WebSockets. Un client web reste parfaitement synchronisé quel que soit le worker traitant la requête HTTP.
 
 ### Arborescence backend (`backend/app/`)
 
 - `main.py` : Entrée de l'application FastAPI, initialisation des routes, des événements de démarrage (`boot_state.py`) et du serveur d'assets statiques.
 - `playback_manager.py` : Moteur de lecture multi-canal (gestion de l'état `PLAYING`, `PAUSED`, `IDLE`, minutage et reprise).
 - `scheduler_manager.py` : Gestionnaire `APScheduler` de la programmation horaire (récurrences, détections de conflits, décalages).
-- `timer_manager.py` : Minuteur de décompte inter-cours et enchaînement audio coach.
 - `models.py` : Déclarations SQLAlchemy ORM.
 - `config.py` : Gestionnaire de configuration dynamique.
-- `routers/` : Endpoints HTTP groupés par domaine (`videos`, `backgrounds`, `playlists`, `audio`, `audio_playlists`, `schedule`, `playback`, `timer`, `settings`, `logs`, `import_jobs`).
+- `routers/` : Endpoints HTTP groupés par domaine (`videos`, `backgrounds`, `playlists`, `audio`, `audio_playlists`, `schedule`, `playback`, `settings`, `logs`, `import_jobs`).
 
 ---
 
@@ -191,15 +190,13 @@ sudo ./install.sh
 | **Playlists Audio** | `/api/audio-playlists` | Playlists mixtes audio coach avec fonds |
 | **Planning** | `/api/schedule` | Programmateurs, occurrences et exceptions |
 | **Lecture** | `/api/playback` | Contrôle de la lecture (play, pause, seek, stop, reprise) |
-| **Minuteur** | `/api/timer` | État et contrôle du décompte inter-cours |
-| **Paramètres** | `/api/settings` | Configuration dynamique du système et de la sortie vidéo |
+| **Paramètres** | `/api/settings` | Configuration dynamique, sortie vidéo et espace de stockage |
 | **Imports** | `/api/import-jobs` | Suivi des tâches d'importation en arrière-plan |
 | **Logs** | `/api/logs` | Consultation et téléchargement des journaux système |
 
 ### WebSockets
 
-- `/ws/playback` : Diffusion en temps réel de l'état de lecture par canal (*position*, *durée*, *média courant*).
-- `/ws/timer` : Synchronisation temps réel du minuteur d'inter-cours.
+- `/ws/playback` : Diffusion en temps réel de l'état de lecture par canal (*position*, *durée*, *média courant*, décompte inter-cours).
 
 ---
 

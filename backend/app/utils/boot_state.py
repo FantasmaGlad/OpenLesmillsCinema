@@ -9,10 +9,8 @@ def current_boot_id() -> str:
     Tous les workers d'un même `systemctl start` partagent ce même parent ;
     après un restart du service, le parent change, donc l'identifiant aussi.
 
-    Partagé entre PlaybackManager et TimerManager (réf. correctif "le
-    minuteur n'a aucune persistance Redis, contrairement à PlaybackManager") :
-    les deux ont besoin de la même distinction "redémarrage complet du
-    service" (état temporaire à purger) vs "un seul worker relancé par le
+    Utilisé par PlaybackManager pour distinguer "redémarrage complet du
+    service" (état temporaire à purger) de "un seul worker relancé par le
     superviseur au sein du même lancement" (état à reprendre tel quel).
     """
     ppid = os.getppid()
@@ -29,9 +27,8 @@ def current_boot_id() -> str:
 
 
 # Clé Redis partagée marquant le dernier boot_id connu (réf. current_boot_id
-# ci-dessus) : quiconque (PlaybackManager ou TimerManager, sur n'importe quel
-# worker) la trouve différente de la sienne est le premier à détecter un
-# nouveau lancement de service, la met à jour, et purge SON PROPRE état
-# temporaire — l'opération est idempotente si plusieurs managers/workers s'en
-# aperçoivent en même temps.
+# ci-dessus) : le premier worker qui la trouve différente de la sienne détecte
+# un nouveau lancement de service, la met à jour, et purge SON PROPRE état
+# temporaire — l'opération est idempotente si plusieurs workers s'en aperçoivent
+# en même temps.
 BOOT_ID_REDIS_KEY = "playback:boot_id"

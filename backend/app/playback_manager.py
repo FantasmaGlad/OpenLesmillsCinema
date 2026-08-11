@@ -123,11 +123,10 @@ class PlaybackManager:
             boot_id = current_boot_id()
             stored_boot_id = await redis.get(BOOT_ID_REDIS_KEY)
             if stored_boot_id != boot_id:
-                # Premier worker (PlaybackManager ou TimerManager, cf.
-                # app.utils.boot_state) d'un nouveau lancement de service : on
-                # purge les données temporaires de lecture DES DEUX CANAUX et
-                # on marque le lancement. Idempotent si plusieurs
-                # workers/canaux/managers passent ici en même temps.
+                # Premier worker (cf. app.utils.boot_state) d'un nouveau
+                # lancement de service : on purge les données temporaires de
+                # lecture DES DEUX CANAUX et on marque le lancement. Idempotent
+                # si plusieurs workers/canaux passent ici en même temps.
                 await redis.set(BOOT_ID_REDIS_KEY, boot_id)
                 await redis.delete(*(f"{REDIS_STATE_KEY_PREFIX}:{c}" for c in CHANNELS))
                 logger.info("Nouveau lancement du service : état de lecture temporaire purgé")

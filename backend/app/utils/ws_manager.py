@@ -10,7 +10,6 @@ from app.utils.redis_client import get_redis
 logger = logging.getLogger(__name__)
 
 REDIS_CHANNEL = "playback:broadcast"
-TIMER_REDIS_CHANNEL = "timer:broadcast"
 
 
 def _apply_remote_message(data: dict) -> None:
@@ -34,9 +33,6 @@ def _apply_remote_message(data: dict) -> None:
             get_playback_manager(data.get("channel") or "cable").apply_remote_state(
                 data.get("data") or {}, data.get("origin")
             )
-        elif event == "timer_change":
-            from app.timer_manager import get_timer_manager
-            get_timer_manager().apply_remote_state(data.get("data") or {}, data.get("origin"))
     except RuntimeError:
         pass
 
@@ -69,9 +65,9 @@ class ConnectionManager:
     """
 
     def __init__(self, channel: str = REDIS_CHANNEL):
-        # Canal Redis propre à cette instance : le minuteur a le sien
-        # (TIMER_REDIS_CHANNEL) pour que ses clients ne reçoivent pas tout le
-        # trafic de lecture (position_tick à 4 Hz) et réciproquement.
+        # Canal Redis propre à cette instance (paramétrable pour rester
+        # réutilisable si un autre flux temps réel doit un jour être isolé du
+        # trafic de lecture).
         self._channel = channel
         self.active_connections: dict[WebSocket, asyncio.Task] = {}
         self._last_pong: dict[WebSocket, float] = {}

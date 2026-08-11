@@ -15,10 +15,10 @@ async def acquire_tick_lock(key: str, ttl_ms: int) -> bool:
     Contrairement au planning (un seul tir ponctuel par occurrence), ces
     tâches tournent en continu tant qu'un worker les fait vivre en mémoire —
     mais RIEN n'empêchait jusqu'ici deux workers d'avoir chacun une copie de
-    la MÊME tâche active en même temps (ex. reprise d'un minuteur après le
-    crash du worker qui le faisait tourner, cf. TimerManager.sync_from_redis) :
-    chacun émettrait alors son propre tick à la même seconde, faisant défiler
-    le minuteur/le décompte plusieurs fois trop vite. Un SET NX PX court
+    la MÊME tâche active en même temps (ex. reprise d'une attente inter-cours
+    après le crash du worker qui la faisait tourner) : chacun émettrait alors
+    son propre tick à la même seconde, faisant défiler le décompte plusieurs
+    fois trop vite. Un SET NX PX court
     (légèrement supérieur à l'intervalle réel entre deux ticks) garantit
     qu'un seul worker agit par tick ; les autres constatent le verrou déjà
     pris et s'abstiennent silencieusement pour CE tour — leur état local est

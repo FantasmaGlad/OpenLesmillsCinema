@@ -16,7 +16,7 @@ from app.config import settings
 from app.database import init_db, get_db
 from app.models import AudioTrack, Background, Video
 from app.playback_manager import get_all_playback_managers
-from app.routers import videos, playback, timer, schedule, playlists, backgrounds, audio, audio_playlists, settings as settings_router, logs, import_jobs
+from app.routers import videos, playback, schedule, playlists, backgrounds, audio, audio_playlists, settings as settings_router, logs, import_jobs
 from app.scheduler_manager import (
     start_scheduler,
     start_schedule_sync_listener,
@@ -69,14 +69,7 @@ async def lifespan(app: FastAPI):
     # abonnement au canal de diffusion inter-workers.
     for playback_manager in get_all_playback_managers().values():
         await playback_manager.sync_from_redis()
-    # Réf. correctif "le minuteur n'a aucune persistance Redis, contrairement
-    # à PlaybackManager" : même reprise d'état / relance de tick que ci-dessus.
-    await timer.timer_manager.sync_from_redis()
     await ws_manager.start_redis_listener()
-    # Écouteur du canal minuteur (correctif "0 synchronisation") : jamais
-    # démarré auparavant — les évènements minuteur étaient publiés dans Redis
-    # mais aucun worker ne les relayait à ses clients WebSocket.
-    await timer.timer_ws_manager.start_redis_listener()
     # Écouteur de synchronisation du planning (réf. correctif "la modification
     # d'un planning ne se propage qu'au worker qui a reçu la requête") : même
     # principe que les deux écouteurs ci-dessus, pour que les 4 workers
@@ -92,7 +85,6 @@ async def lifespan(app: FastAPI):
     for playback_manager in get_all_playback_managers().values():
         playback_manager.stop_position_broadcast_loop()
     await ws_manager.stop_redis_listener()
-    await timer.timer_ws_manager.stop_redis_listener()
     await stop_schedule_sync_listener()
     await close_redis()
 
@@ -113,7 +105,6 @@ app.add_middleware(
 app.include_router(videos.router)
 app.include_router(playback.router)
 app.include_router(playlists.router)
-app.include_router(timer.router)
 app.include_router(schedule.router)
 app.include_router(backgrounds.router)
 app.include_router(audio.router)
