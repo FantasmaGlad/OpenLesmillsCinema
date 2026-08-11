@@ -105,7 +105,6 @@ _STORAGE_TRACKED_DIRS = (
     "backgrounds_watch_dir",
     "audio_dir",
     "audio_watch_dir",
-    "canvas_assets_dir",
     "logs_dir",
 )
 

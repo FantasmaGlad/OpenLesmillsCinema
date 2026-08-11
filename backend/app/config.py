@@ -32,10 +32,6 @@ class Settings(BaseSettings):
     # Logs (Lot 9.6/13, réf. F8.2/F8.3) : dossier dédié, séparé des données média.
     logs_dir: str = "data/logs"
 
-    # Éditeur de canvas (Lot 12, réf. UX2.2) : logos/images importés pour les
-    # compositions attente/pause, dossier dédié séparé des autres médias.
-    canvas_assets_dir: str = "data/canvas_assets"
-
     # Mode audio coach (Lot 8, réf. F10.3/UX4.8) : réglage par défaut de la
     # minuterie entre pistes en mode "auto + minuterie".
     audio_chain_timer_seconds: int = 20
@@ -124,7 +120,6 @@ def load_settings() -> Settings:
         "audio_dir",
         "audio_watch_dir",
         "logs_dir",
-        "canvas_assets_dir",
     ]:
         path_str = getattr(settings, path_attr)
         path = Path(path_str)

@@ -107,7 +107,6 @@ def init_db():
         settings.audio_dir,
         settings.audio_watch_dir,
         settings.logs_dir,
-        settings.canvas_assets_dir,
     ]:
         Path(path_str).mkdir(parents=True, exist_ok=True)
 
@@ -119,7 +118,6 @@ def init_db():
     _migrate_audio_playlist_items_to_tracks()
     Base.metadata.create_all(bind=engine)
     _migrate_add_missing_columns()
-    _seed_default_canvas_layouts()
 
 
 def _migrate_audio_playlist_items_to_tracks():
@@ -224,35 +222,6 @@ def _migrate_add_missing_columns():
                 logger.info(
                     f"Migration : colonne {table}.{column} déjà ajoutée par un autre worker, ignoré"
                 )
-
-
-def _seed_default_canvas_layouts():
-    """
-    Amorce une composition « Attente standard » et « Pause standard » actives
-    (Lot 12, réf. UX2.1/UX2.11) si la table `canvas_layouts` est vide pour ce
-    type — uniquement au tout premier démarrage : le kiosk a besoin d'une
-    composition active dès le départ, sans quoi le rendu dynamique n'aurait
-    rien à afficher avant la première visite de l'éditeur.
-    """
-    from app.models import CanvasLayout, CanvasLayoutType
-    from app.utils.canvas_defaults import DEFAULTS
-
-    db = SessionLocal()
-    try:
-        for layout_type, build_definition in DEFAULTS.items():
-            exists = db.query(CanvasLayout).filter(CanvasLayout.type == layout_type).first()
-            if exists:
-                continue
-            label = "Attente standard" if layout_type == CanvasLayoutType.waiting.value else "Pause standard"
-            db.add(CanvasLayout(
-                type=layout_type,
-                name=label,
-                definition=build_definition(),
-                active=True,
-            ))
-        db.commit()
-    finally:
-        db.close()
 
 
 def reset_database_connection(new_url: str):

@@ -16,7 +16,7 @@ from app.config import settings
 from app.database import init_db, get_db
 from app.models import AudioTrack, Background, Video
 from app.playback_manager import get_all_playback_managers
-from app.routers import videos, playback, timer, schedule, playlists, backgrounds, audio, audio_playlists, settings as settings_router, logs, canvas, import_jobs
+from app.routers import videos, playback, timer, schedule, playlists, backgrounds, audio, audio_playlists, settings as settings_router, logs, import_jobs
 from app.scheduler_manager import (
     start_scheduler,
     start_schedule_sync_listener,
@@ -120,7 +120,6 @@ app.include_router(audio.router)
 app.include_router(audio_playlists.router)
 app.include_router(settings_router.router)
 app.include_router(logs.router)
-app.include_router(canvas.router)
 app.include_router(import_jobs.router)
 
 
@@ -253,11 +252,6 @@ async def stream_audio_track(
 thumbnails_path = Path(settings.thumbnails_dir)
 thumbnails_path.mkdir(parents=True, exist_ok=True)
 app.mount("/api/thumbnails", StaticFiles(directory=str(thumbnails_path)), name="thumbnails")
-
-# Assets de l'éditeur de canvas (logos, images de fond importés, Lot 12)
-canvas_assets_path = Path(settings.canvas_assets_dir)
-canvas_assets_path.mkdir(parents=True, exist_ok=True)
-app.mount("/api/canvas_assets", StaticFiles(directory=str(canvas_assets_path)), name="canvas_assets")
 
 # Frontend Next.js statique (si compilé et présent dans out/)
 frontend_out = Path(__file__).resolve().parent.parent.parent / "frontend" / "out"

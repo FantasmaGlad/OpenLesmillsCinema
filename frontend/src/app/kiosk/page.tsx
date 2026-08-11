@@ -2,11 +2,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { usePlaybackSocket, PlaybackEvent } from "@/lib/usePlaybackSocket";
-import { useTimerSocket } from "@/lib/useTimerSocket";
 import { useAppSettings } from "@/lib/AppSettingsContext";
 import { isWiredDisplay, useDisplayOutputRedirect } from "@/lib/useDisplayOutputRedirect";
-import CanvasRenderer from "@/components/CanvasRenderer";
-import { CanvasDefinition } from "@/lib/canvas";
 import Icon from "@/components/Icon";
 import AppLogo from "@/components/AppLogo";
 
@@ -26,6 +23,16 @@ function formatTime(seconds: number | null | undefined) {
 
 function formatClock(date: Date) {
   return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+}
+
+// Durée hh:mm:ss pour le compte à rebours « prochain cours » de l'écran
+// d'attente (format identique à l'ancien habillage dynamique).
+function formatDuration(seconds: number) {
+  const total = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
 type OsdContent = { icon: string; label: string } | null;
@@ -69,7 +76,6 @@ export default function KioskPage() {
   // dont l'horloge système peut être décalée si NTP n'a pas encore synchro.
   const clockOffsetRef = useRef<number>(0);
   const [nextCourse, setNextCourse] = useState<NextCourse | null>(null);
-  const [waitingLayout, setWaitingLayout] = useState<CanvasDefinition | null>(null);
   // Vidéo d'animation de lancement (réf. mission point 4) : jouée à chaque
   // entrée en état "countdown", à la place de l'ancien anneau chiffré.
   const introRef = useRef<HTMLVideoElement | null>(null);
@@ -135,30 +141,6 @@ export default function KioskPage() {
       clearInterval(id);
     };
   }, [channel]);
-
-  // Composition active de l'écran d'attente (Lot 12, réf. UX2.1/UX2.11) :
-  // sondée plutôt que poussée en temps réel — l'application d'une nouvelle
-  // composition depuis l'admin est une action administrative, pas une
-  // commande de lecture soumise à la contrainte <500ms de NF4. L'écran de
-  // pause, lui, a désormais sa propre mise en page dédiée façon streaming
-  // (réf. mission UI/UX) plutôt que le rendu canvas générique.
-  useEffect(() => {
-    let cancelled = false;
-    const fetchLayouts = () => {
-      fetch(getApiUrl("/canvas/active/waiting"), { cache: "no-store" })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (!cancelled && data) setWaitingLayout(data.definition);
-        })
-        .catch(() => {});
-    };
-    fetchLayouts();
-    const id = setInterval(fetchLayouts, 10000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
 
   const showOsd = useCallback((content: OsdContent) => {
     setOsd(content);
@@ -569,7 +551,6 @@ export default function KioskPage() {
   useEffect(() => {
     isPrimaryRef.current = isPrimary;
   }, [isPrimary]);
-  const { state: timerState } = useTimerSocket();
   // Bascule kiosk/cinéma par canal (réf. canaux indépendants) : cette page
   // navigue vers /cinema si SON canal (câblé si c'est l'écran du Wyse,
   // réseau sinon) est passé en mode cinéma.
@@ -646,61 +627,48 @@ export default function KioskPage() {
   const duration = state.current_video?.duration_seconds ?? 0;
   const pauseProgressPercent = duration > 0 ? Math.min(100, (state.position_seconds / duration) * 100) : 0;
 
-  // Horloge serveur corrigée, en ms (réf. audit plan-corrections-bugs, point
-  // 7) : recalculée à chaque rendu (déclenché à 5 Hz par le tick rapide
-  // ci-dessus) pour interpoler compte à rebours et minuteur localement,
-  // plutôt que d'attendre le prochain tick serveur (saccadé).
-  const correctedNowMs = Date.now() + clockOffsetRef.current;
-
-  const timerRemainingLocal =
-    timerState.mode === "countdown"
-      ? timerState.ends_at != null
-        ? Math.max(0, (timerState.ends_at - correctedNowMs) / 1000)
-        : timerState.remaining_seconds ?? 0
-      : null;
-  const timerElapsedLocal =
-    timerState.mode === "countup"
-      ? timerState.started_at != null
-        ? Math.max(0, (correctedNowMs - timerState.started_at) / 1000)
-        : timerState.elapsed_seconds ?? 0
-      : null;
-
-  // Version interpolée localement, passée au canvas (élément "timer") pour
-  // qu'un seul point de calcul serve les deux rendus (overlay + canvas)
-  // plutôt que de dupliquer la logique d'interpolation dans CanvasElementView.
-  const interpolatedTimerState = {
-    ...timerState,
-    remaining_seconds: timerRemainingLocal,
-    elapsed_seconds: timerElapsedLocal,
-  };
-
   const nextPlaylistItem = state.playlist_items && state.playlist_index !== null && state.playlist_index !== undefined
     ? state.playlist_items[state.playlist_index + 1]
     : null;
 
-  const canvasLive = {
-    now,
-    nextCourseTitle: nextCourse?.title ?? null,
-    nextCourseRemainingSeconds: nextCourseRemaining,
-    hasNextCourse: nextCourse !== null,
-    timerState: interpolatedTimerState,
-    currentTitle: state.current_video?.title ?? null,
-  };
-
   return (
     <div className="kiosk-root">
+      {/* Écran d'attente (réf. mission logo + prochain cours) : habillage figé
+          rendu nativement — horloge, logo imposant et bloc « prochain cours ».
+          Les tailles de texte sont en `cqh` (% de la hauteur de .kiosk-root,
+          qui porte container-type: size), et les positions en % reprennent à
+          l'identique l'ancien habillage. */}
       <div className={`kiosk-layer kiosk-waiting ${isIdle || (introActive && !introReady) ? "visible" : ""}`}>
-        {waitingLayout
-          ? <CanvasRenderer definition={waitingLayout} live={canvasLive} />
-          : (
-            // Fallback si aucun canvas "En attente" n'est configuré dans l'admin
-            // (réf. Bug 3 / B3) : afficher au minimum l'heure pour éviter l'écran noir.
-            <div className="kiosk-waiting-default">
-              <AppLogo size={140} className="kiosk-waiting-logo" />
-              <span className="kiosk-clock">{formatClock(now)}</span>
+        <div className="kiosk-waiting-stage">
+          <div className="kiosk-waiting-cell" style={{ left: "20%", top: "20%", width: "60%", height: "14%" }}>
+            <span className="kiosk-waiting-clock" style={{ fontSize: "8cqh" }}>{formatClock(now)}</span>
+          </div>
+          <div className="kiosk-waiting-cell" style={{ left: "28%", top: "37%", width: "44%", height: "16%" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- logo statique de l'app, pas un asset buildé */}
+            <img src="/logo.png" alt="Logo" className="app-logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          </div>
+          <div className="kiosk-waiting-cell" style={{ left: "15%", top: "56%", width: "70%", height: "30%" }}>
+            <div className="kiosk-waiting-next">
+              {nextCourse ? (
+                <>
+                  <span className="kiosk-waiting-next-label" style={{ fontSize: "calc(2.2cqh * 0.45)" }}>
+                    {t("kiosk.nextCourseLabel")}
+                  </span>
+                  <span className="kiosk-waiting-next-title" style={{ fontSize: "2.2cqh" }}>
+                    {nextCourse.title ?? t("kiosk.scheduledCourseFallback")}
+                  </span>
+                  <span className="kiosk-waiting-next-countdown" style={{ fontSize: "calc(2.2cqh * 1.3)" }}>
+                    {formatDuration(nextCourseRemaining ?? 0)}
+                  </span>
+                </>
+              ) : (
+                <span className="kiosk-waiting-next-empty" style={{ fontSize: "calc(2.2cqh * 0.55)" }}>
+                  {t("kiosk.waitingForNextCourse")}
+                </span>
+              )}
             </div>
-          )
-        }
+          </div>
+        </div>
       </div>
 
       <div className={`kiosk-layer kiosk-playlist-waiting ${state.state === "playlist_waiting" ? "visible" : ""}`}>
@@ -827,9 +795,9 @@ export default function KioskPage() {
         // vidéo assombrie visible en fond (pas de coupure brutale), gros
         // bouton central pour reprendre, bandeau d'info en bas à gauche
         // (logo, titre, programme, position), barre de progression pleine
-        // largeur au tout bord inférieur — plus de rendu canvas générique
-        // dont le texte pouvait chevaucher ces éléments (réf. correctif
-        // "informations qui se chevauchent").
+        // largeur au tout bord inférieur — mise en page dédiée dont le texte
+        // ne chevauche pas ces éléments (réf. correctif "informations qui se
+        // chevauchent").
         <div className="pause-overlay visible">
           <div className="pause-overlay-glow" />
           <button

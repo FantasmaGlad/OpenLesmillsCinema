@@ -1530,9 +1530,6 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: 0.1em;
 }
 
-/* Fallback affiché quand aucun canvas "En attente" n'est configuré dans
-   l'admin (réf. Bug 3 / B3) : fond sombre neutre avec l'heure centrée pour
-   éviter l'écran 100% noir après un Stop. */
 /* Logo imposant sur les écrans d'attente (réf. mission logo) : signe la
    paternité du projet sur l'écran d'attente par défaut et l'attente
    inter-cours, façon écran d'accueil de plateforme de streaming. */
@@ -1541,14 +1538,65 @@ h1, h2, h3, h4, h5, h6 {
   opacity: 0.95;
 }
 
-.kiosk-waiting-default {
+/* Écran d'attente natif : habillage figé (horloge + logo + bloc « prochain
+   cours ») rendu directement par le kiosk. Les positions/tailles en % et les
+   tailles de texte en cqh reprennent à l'identique l'ancien habillage
+   dynamique. cqh se résout contre .kiosk-root (container-type: size). */
+.kiosk-waiting-stage {
   position: absolute;
   inset: 0;
+}
+
+.kiosk-waiting-cell {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  text-align: center;
+}
+
+.kiosk-waiting-clock {
+  font-family: var(--font-title);
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+}
+
+.kiosk-waiting-next {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  background: radial-gradient(circle at center, var(--bg-surface) 0%, var(--bg-main) 100%);
+  gap: 6px;
+  color: var(--text-main);
+}
+
+.kiosk-waiting-next-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-weight: 700;
+}
+
+.kiosk-waiting-next-title {
+  font-family: var(--font-title);
+  font-weight: 800;
+  color: var(--accent-primary);
+  text-transform: uppercase;
+}
+
+.kiosk-waiting-next-empty {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.kiosk-waiting-next-countdown {
+  font-family: var(--font-title);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 .kiosk-video-layer {
@@ -1654,101 +1702,6 @@ h1, h2, h3, h4, h5, h6 {
   font-weight: 800;
   color: var(--text-main);
   font-variant-numeric: tabular-nums;
-}
-
-/* ============================================================
-   Rendu dynamique du canvas (Lot 12, réf. UX2.1/UX2.2/12.2) — remplace
-   l'habillage figé du Lot 4 par des éléments positionnés depuis la
-   composition active (JSON), partagé entre le kiosk et la prévisualisation
-   de l'éditeur PC.
-   ============================================================ */
-.canvas-render-root {
-  position: absolute;
-  inset: 0;
-}
-
-.canvas-render-element {
-  position: absolute;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  text-align: center;
-}
-
-.canvas-el-placeholder {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  border: 1px dashed var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 8px 16px;
-}
-
-.canvas-el-clock {
-  font-family: var(--font-title);
-  font-weight: 800;
-  color: var(--text-main);
-  letter-spacing: 0.05em;
-  font-variant-numeric: tabular-nums;
-}
-
-.canvas-el-text {
-  font-family: var(--font-title);
-  font-weight: 800;
-  color: var(--text-main);
-  letter-spacing: 0.08em;
-  white-space: pre-wrap;
-}
-
-.canvas-el-next-course,
-.canvas-el-timer {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-main);
-}
-
-.canvas-el-next-course-label,
-.canvas-el-timer-label {
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  font-weight: 700;
-}
-
-.canvas-el-next-course-title {
-  font-family: var(--font-title);
-  font-weight: 800;
-  color: var(--accent-primary);
-  text-transform: uppercase;
-}
-
-.canvas-el-next-course-empty {
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.canvas-el-next-course-countdown,
-.canvas-el-countdown,
-.canvas-el-timer-value {
-  font-family: var(--font-title);
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.canvas-el-countdown {
-  color: var(--text-main);
-  text-shadow: 0 0 60px currentColor;
-}
-
-.canvas-el-timer-ended .canvas-el-timer-value {
-  color: var(--accent-error);
-  animation: timerPulseFullscreen 1.2s ease-in-out infinite;
 }
 
 /* ============================================================

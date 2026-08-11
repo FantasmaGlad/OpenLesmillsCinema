@@ -44,7 +44,6 @@ print(json.dumps({
     "backgrounds_dir": settings.backgrounds_dir,
     "audio_dir": settings.audio_dir,
     "thumbnails_dir": settings.thumbnails_dir,
-    "canvas_assets_dir": settings.canvas_assets_dir,
 }))
 ')"
 
@@ -70,7 +69,7 @@ if [[ -f "${WORK_DIR}/config.toml" ]]; then
     fi
 fi
 
-for key in media_dir backgrounds_dir audio_dir thumbnails_dir canvas_assets_dir; do
+for key in media_dir backgrounds_dir audio_dir thumbnails_dir; do
     src="${WORK_DIR}/${key}"
     [[ -d "${src}" ]] || continue
     dest="$(echo "${PATHS_JSON}" | python3 -c "import json,sys; print(json.load(sys.stdin)[\"${key}\"])")"

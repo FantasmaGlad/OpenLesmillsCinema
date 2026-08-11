@@ -8,8 +8,7 @@
 # Sauvegarde, dans une seule archive .tar.gz horodatée :
 #   - la base SQLite (database.db)
 #   - le fichier de configuration actif (config.toml, dépôt ou /etc)
-#   - tous les dossiers de médias (vidéos, fonds animés, cours audio, miniatures,
-#     assets du canvas)
+#   - tous les dossiers de médias (vidéos, fonds animés, cours audio, miniatures)
 #
 # Le strict minimum exigé par NF7 est "base SQLite + config + dossier vidéos" ;
 # ce script sauvegarde aussi les autres médias par prudence (coût négligeable,
@@ -46,7 +45,6 @@ print(json.dumps({
     "backgrounds_dir": settings.backgrounds_dir,
     "audio_dir": settings.audio_dir,
     "thumbnails_dir": settings.thumbnails_dir,
-    "canvas_assets_dir": settings.canvas_assets_dir,
 }))
 ')"
 
@@ -72,7 +70,7 @@ fi
 log "Copie de la configuration (${CONFIG_FILE})"
 [[ -f "${CONFIG_FILE}" ]] && cp "${CONFIG_FILE}" "${WORK_DIR}/backup/config.toml"
 
-for key in media_dir backgrounds_dir audio_dir thumbnails_dir canvas_assets_dir; do
+for key in media_dir backgrounds_dir audio_dir thumbnails_dir; do
     dir="$(echo "${PATHS_JSON}" | python3 -c "import json,sys; print(json.load(sys.stdin)[\"${key}\"])")"
     if [[ -d "${dir}" ]]; then
         log "Copie de ${key} (${dir})"

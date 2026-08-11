@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import ForeignKey, JSON
+from sqlalchemy import ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -27,11 +27,6 @@ class ScheduleTargetType(str, enum.Enum):
 class OverrideAction(str, enum.Enum):
     cancelled = "cancelled"
     replaced = "replaced"
-
-
-class CanvasLayoutType(str, enum.Enum):
-    waiting = "waiting"
-    pause = "pause"
 
 
 class Video(Base):
@@ -214,16 +209,6 @@ class PlaybackState(Base):
     # en attente PAR canal, réf. mission "tableaux de bord Câblé / Réseau").
     channel: Mapped[str] = mapped_column(default="cable", server_default="cable")
     interrupted_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
-
-
-class CanvasLayout(Base):
-    __tablename__ = "canvas_layouts"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    type: Mapped[CanvasLayoutType]
-    name: Mapped[str]
-    definition: Mapped[dict] = mapped_column(JSON)
-    active: Mapped[bool] = mapped_column(default=False)
 
 
 class Setting(Base):

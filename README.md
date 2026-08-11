@@ -103,7 +103,7 @@ Le backend tourne en plusieurs workers `uvicorn` sous le même processus maître
 - `timer_manager.py` : Minuteur de décompte inter-cours et enchaînement audio coach.
 - `models.py` : Déclarations SQLAlchemy ORM.
 - `config.py` : Gestionnaire de configuration dynamique.
-- `routers/` : Endpoints HTTP groupés par domaine (`videos`, `playlists`, `audio_playlists`, `schedule`, `playback`, `settings`, `logs`, `import_jobs`).
+- `routers/` : Endpoints HTTP groupés par domaine (`videos`, `backgrounds`, `playlists`, `audio`, `audio_playlists`, `schedule`, `playback`, `timer`, `settings`, `logs`, `import_jobs`).
 
 ---
 
