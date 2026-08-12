@@ -15,6 +15,8 @@ export const navLinks: NavLinkConfig[] = [
   { href: "/backgrounds", labelKey: "nav.backgrounds", iconName: "gradient" },
   { href: "/playlists", labelKey: "nav.playlists", iconName: "playlist_play" },
   { href: "/audio-playlists", labelKey: "nav.audioPlaylists", iconName: "queue_music" },
+  { href: "/radio-remote", labelKey: "nav.radioRemote", iconName: "graphic_eq" },
+  { href: "/radio-library", labelKey: "nav.radioLibrary", iconName: "radio" },
   { href: "/schedule", labelKey: "nav.schedule", iconName: "calendar_month" },
 ];
 

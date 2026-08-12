@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     audio_dir: str = "data/audio"
     audio_watch_dir: str = "data/audio_watched"
 
+    # Module Radio (réf. docs/cahier-des-charges-radio.md) : sous-système
+    # musical indépendant, dossiers séparés des cours audio coach. `radio_dir`
+    # = fichiers musique, `radio_covers_dir` = pochettes (extraites ID3 ou
+    # uploadées), `radio_announcements_dir` = rappels, `radio_watch_dir` =
+    # dossier surveillé d'import musique.
+    radio_dir: str = "data/radio"
+    radio_covers_dir: str = "data/radio_covers"
+    radio_announcements_dir: str = "data/radio_announcements"
+    radio_watch_dir: str = "data/radio_watched"
+
     # Logs (Lot 9.6/13, réf. F8.2/F8.3) : dossier dédié, séparé des données média.
     logs_dir: str = "data/logs"
 
@@ -48,6 +58,17 @@ class Settings(BaseSettings):
     # Paramètres de lecture par défaut
     wait_time_between_courses: int = 10
     volume_default: int = 100
+
+    # Réglages de lecture Radio (réf. docs/cahier-des-charges-radio.md, §9).
+    # Consommés par les lots ultérieurs (moteur de lecture L3, crossfade L5,
+    # rappels L6, auto-boot L7) ; déclarés ici pour centraliser la config.
+    # La playlist d'ambiance par défaut n'est PAS un réglage : c'est la
+    # RadioPlaylist marquée `is_default` (cf. models.py).
+    radio_volume_default: int = 100
+    radio_crossfade_seconds: int = 4
+    radio_announcement_duck_level: int = 15   # volume musique (%) pendant un rappel en mode duck
+    radio_announcement_fade_ms: int = 1500    # durée du fondu d'entrée/sortie du duck (ms)
+    radio_autostart_on_boot: bool = True
 
     class Config:
         env_prefix = "OPENLESMILLS_"
@@ -119,6 +140,10 @@ def load_settings() -> Settings:
         "backgrounds_watch_dir",
         "audio_dir",
         "audio_watch_dir",
+        "radio_dir",
+        "radio_covers_dir",
+        "radio_announcements_dir",
+        "radio_watch_dir",
         "logs_dir",
     ]:
         path_str = getattr(settings, path_attr)
@@ -141,7 +166,18 @@ def load_settings() -> Settings:
 # persistés dans la table `settings` (clé/valeur, cf. §7 cahier fonctionnel)
 # au lieu de config.toml : ils doivent survivre à un redémarrage (F7.3) sans
 # nécessiter de réécrire le fichier de config.
-_DB_OVERRIDABLE_FIELDS = ("wait_time_between_courses", "volume_default", "audio_chain_timer_seconds")
+_DB_OVERRIDABLE_FIELDS = (
+    "wait_time_between_courses",
+    "volume_default",
+    "audio_chain_timer_seconds",
+    # Réglages Radio modifiables à chaud (entiers uniquement, cf. mécanisme
+    # int() ci-dessous) ; `radio_autostart_on_boot` (bool) reste piloté par
+    # config.toml, pas par la table settings.
+    "radio_volume_default",
+    "radio_crossfade_seconds",
+    "radio_announcement_duck_level",
+    "radio_announcement_fade_ms",
+)
 
 
 def _apply_db_overrides(settings: "Settings") -> None:

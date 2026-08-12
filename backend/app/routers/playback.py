@@ -6,8 +6,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import AudioCourse, AudioPlaylist, Background, PlaybackState, Video, Playlist
+from app.models import AudioCourse, AudioPlaylist, Background, PlaybackState, RadioPlaylist, RadioTrack, Video, Playlist
 from app.playback_manager import CHANNELS, DEFAULT_CHANNEL, get_playback_manager, init_playback_managers
+from app.radio_manager import init_radio_manager, get_radio_manager
 from app.routers.settings import get_display_output_value
 from app.scheduler_manager import ensure_utc, resolve_target_title
 from app.utils.activity_log import log_activity
@@ -24,6 +25,10 @@ router = APIRouter(tags=["playback"])
 # réseau (autres appareils du LAN) ont chacun leur lecture, leur playlist et
 # leur planning, totalement indépendants.
 playback_managers = init_playback_managers(ws_manager.broadcast)
+# 3e canal, radio (réf. docs/cahier-des-charges-radio.md, lot L3) : moteur de
+# lecture INDÉPENDANT (décisions D1/D2), même broadcast partagé pour rester
+# sur la même connexion WebSocket que les deux canaux ci-dessus.
+radio_manager = init_radio_manager(ws_manager.broadcast)
 
 
 def _resolve_channel(value) -> str:
@@ -236,6 +241,14 @@ async def playback_ws(websocket: WebSocket, db: Session = Depends(get_db)):
                 "channel": channel,
                 "data": get_playback_manager(channel).snapshot(),
             })
+        # 3e canal radio (réf. lot L3), hors CHANNELS (cable/network) : envoyé
+        # à part, même mécanisme.
+        await websocket.send_json({
+            "event": "state_change",
+            "cause": "sync",
+            "channel": "radio",
+            "data": get_radio_manager().snapshot(),
+        })
         while True:
             message = await websocket.receive_json()
             # Identification du rôle du client (réf. correctif P4).
@@ -312,19 +325,32 @@ async def _handle_command(
     command = message.get("command")
     params = message.get("params") or {}
     client_ts = params.get("client_ts")
-    # Canal ciblé par la commande (réf. mission "tableaux de bord Câblé /
-    # Réseau") : porté par chaque commande des tableaux de bord ; un kiosk,
-    # lui, agit toujours sur le canal déclaré à son identify. Absent ou
-    # invalide = canal câblé (compatibilité anciens clients).
-    channel = _resolve_channel(params.get("channel") or default_channel)
-    manager = get_playback_manager(channel)
 
     if command == "pong":
         # Réponse du client à notre keepalive (réf. Phase 3, P7) — pas un
         # ordre de lecture, ne fait qu'acter que la connexion est vivante.
+        # Traité avant toute résolution de canal : ne concerne aucun des
+        # gestionnaires d'état.
         if websocket is not None:
             ws_manager.note_pong(websocket)
-    elif command == "load":
+        return
+
+    # Canal ciblé par la commande (réf. mission "tableaux de bord Câblé /
+    # Réseau") : porté par chaque commande des tableaux de bord ; un kiosk,
+    # lui, agit toujours sur le canal déclaré à son identify. Absent ou
+    # invalide = canal câblé (compatibilité anciens clients).
+    raw_channel = params.get("channel") or default_channel
+    if raw_channel == "radio":
+        # 3e canal, moteur INDÉPENDANT (réf. lot L3) : vocabulaire de
+        # commandes propre (radio_*), géré séparément plutôt que dans la
+        # chaîne câblé/réseau ci-dessous.
+        await _handle_radio_command(command, params, client_ts, db)
+        return
+
+    channel = _resolve_channel(raw_channel)
+    manager = get_playback_manager(channel)
+
+    if command == "load":
         if await _reject_if_cinema_locked(db, command, websocket, channel):
             return
         video_id = params.get("video_id")
@@ -566,3 +592,75 @@ async def _handle_command(
         })
     else:
         logger.warning(f"Commande WebSocket inconnue reçue : {command}")
+
+
+def _radio_track_dict(track: RadioTrack) -> dict:
+    """Forme d'une piste radio dans l'état du RadioPlaybackManager (`order`,
+    `current_track`, file d'attente) — réf. §5.1 du cahier des charges."""
+    return {
+        "id": track.id,
+        "title": track.title,
+        "artist": track.artist,
+        "album": track.album,
+        "duration_seconds": track.duration_seconds,
+        "cover_url": f"/radio/tracks/{track.id}/cover" if track.cover_path else None,
+    }
+
+
+async def _handle_radio_command(command: str, params: dict, client_ts, db: Session) -> None:
+    """Commandes du canal radio (réf. docs/cahier-des-charges-radio.md §5.5,
+    lot L3) : vocabulaire propre (radio_*), séparé de la chaîne câblé/réseau
+    ci-dessus car le RadioPlaybackManager n'a pas la même sémantique d'état
+    (playlist de morceaux plutôt que vidéo/cours)."""
+    manager = get_radio_manager()
+
+    if command == "load_radio_playlist":
+        playlist_id = params.get("playlist_id")
+        playlist = db.query(RadioPlaylist).filter(RadioPlaylist.id == playlist_id).first()
+        if not playlist:
+            logger.warning(f"Commande load_radio_playlist : playlist radio {playlist_id} introuvable")
+            return
+        sorted_items = sorted(playlist.items, key=lambda item: item.position)
+        tracks = [_radio_track_dict(item.track) for item in sorted_items if item.track]
+        await manager.load_playlist(
+            playlist.id, playlist.name, tracks, shuffle=params.get("shuffle"), client_ts=client_ts
+        )
+        log_activity(db, "radio_playlist_started", playlist.name)
+    elif command == "play":
+        await manager.play(client_ts)
+    elif command == "pause":
+        await manager.pause(client_ts)
+    elif command == "stop":
+        await manager.stop(client_ts)
+    elif command == "radio_next_track":
+        await manager.next_track(client_ts)
+    elif command == "radio_previous_track":
+        await manager.previous_track(client_ts)
+    elif command == "radio_jump_to_track":
+        await manager.jump_to(int(params.get("index", 0)), client_ts)
+    elif command == "radio_seek":
+        await manager.seek(float(params.get("position_seconds", 0)), client_ts)
+    elif command == "volume":
+        await manager.set_volume(params.get("volume", 100), client_ts)
+    elif command == "radio_set_shuffle":
+        await manager.set_shuffle(bool(params.get("on")), client_ts)
+    elif command == "radio_set_repeat":
+        await manager.set_repeat(params.get("mode", "off"), client_ts)
+    elif command == "radio_add_to_queue":
+        track = db.query(RadioTrack).filter(RadioTrack.id == params.get("track_id")).first()
+        if not track:
+            logger.warning(f"Commande radio_add_to_queue : morceau {params.get('track_id')} introuvable")
+            return
+        await manager.add_to_queue(_radio_track_dict(track), client_ts)
+    elif command == "radio_remove_from_queue":
+        await manager.remove_from_order(int(params.get("index", -1)), client_ts)
+    elif command == "radio_track_ended":
+        await manager.track_ended(client_ts)
+    elif command == "report_position":
+        # Même règle que report_position câblé/réseau : seul le lecteur
+        # primaire (le poste /radio, lot L4) devrait rapporter — pas de
+        # kiosk radio enregistré en L3, donc aucune vérification primaire
+        # ici pour l'instant (rien n'envoie encore cette commande).
+        await manager.report_position(float(params.get("position_seconds", 0)))
+    else:
+        logger.warning(f"Commande radio WebSocket inconnue reçue : {command}")

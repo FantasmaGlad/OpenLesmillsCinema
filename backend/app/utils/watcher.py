@@ -6,8 +6,10 @@ from watchdog.events import FileSystemEventHandler
 
 from app.config import settings
 from app.models import ImportSource
-from app.utils.importer import import_video, import_background, SUPPORTED_EXTENSIONS, BACKGROUND_SUPPORTED_EXTENSIONS
+from app.utils.importer import import_video, import_background, wait_for_file_to_copy, SUPPORTED_EXTENSIONS, BACKGROUND_SUPPORTED_EXTENSIONS
 from app.utils.audio_importer import import_audio_course_from_watched_folder, wait_for_folder_to_stabilize
+from app.utils.radio_importer import import_radio_track_from_watched_file
+from app.utils.radio_utils import AUDIO_EXTENSIONS as RADIO_AUDIO_EXTENSIONS
 from app.utils.executors import ffmpeg_executor as _ffmpeg_executor, io_executor as _io_executor
 from app.utils.import_jobs import create_job, update_job
 
@@ -139,6 +141,35 @@ class AudioCourseWatchHandler(FileSystemEventHandler):
             update_job(job_id, stage="error", error=str(e))
 
 
+class RadioTrackWatchHandler(_BaseWatchHandler):
+    """Module Radio (réf. docs/cahier-des-charges-radio.md) : contrairement aux
+    cours audio coach (un sous-dossier = un cours), chaque fichier musical déposé
+    devient un morceau indépendant. Pas de ffmpeg lourd (ffprobe + extraction de
+    pochette, transcodage seulement pour un format non-web) : exécuteur I/O."""
+
+    supported_extensions = RADIO_AUDIO_EXTENSIONS
+    kind_label = "Morceau radio"
+    executor = _io_executor
+
+    def _safe_import(self, file_path: str):
+        path = Path(file_path)
+        if not path.exists():
+            return
+        # Attend la fin de copie (fichier volumineux déposé progressivement)
+        # avant d'importer, comme les autres imports par dossier surveillé.
+        if not wait_for_file_to_copy(file_path):
+            logger.error(f"Watcher : Le morceau radio {path.name} ne s'est pas stabilisé à temps.")
+            return
+        job_id = create_job("radio", path.name, source="watched_folder")
+        try:
+            logger.info(f"Watcher : Lancement de l'import du morceau radio {path.name}")
+            tracks = import_radio_track_from_watched_file(file_path, job_id=job_id)
+            update_job(job_id, stage="done", result_id=tracks[0].id if tracks else None)
+        except Exception as e:
+            logger.error(f"Watcher : Échec de l'import automatique du morceau radio {path.name} : {e}")
+            update_job(job_id, stage="error", error=str(e))
+
+
 _observer = None
 
 
@@ -150,6 +181,7 @@ def start_watcher():
         (settings.watch_dir, VideoWatchHandler()),
         (settings.backgrounds_watch_dir, BackgroundWatchHandler()),
         (settings.audio_watch_dir, AudioCourseWatchHandler()),
+        (settings.radio_watch_dir, RadioTrackWatchHandler()),
     ):
         watch_path = Path(watch_dir)
         watch_path.mkdir(parents=True, exist_ok=True)

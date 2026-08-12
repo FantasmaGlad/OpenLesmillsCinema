@@ -14,9 +14,11 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import init_db, get_db
-from app.models import AudioTrack, Background, Video
+from app.models import AudioTrack, Background, RadioTrack, Video
 from app.playback_manager import get_all_playback_managers
-from app.routers import videos, playback, schedule, playlists, backgrounds, audio, audio_playlists, settings as settings_router, logs, import_jobs
+from app.radio_manager import get_radio_manager
+from app.routers import videos, playback, schedule, playlists, backgrounds, audio, audio_playlists, radio, radio_playlists, settings as settings_router, logs, import_jobs
+from app.utils.radio_utils import content_type_for
 from app.scheduler_manager import (
     start_scheduler,
     start_schedule_sync_listener,
@@ -69,6 +71,10 @@ async def lifespan(app: FastAPI):
     # abonnement au canal de diffusion inter-workers.
     for playback_manager in get_all_playback_managers().values():
         await playback_manager.sync_from_redis()
+    # Canal radio (réf. docs/cahier-des-charges-radio.md, lot L3) : même
+    # principe de reprise d'état que les canaux câblé/réseau ci-dessus, sur
+    # son propre gestionnaire indépendant.
+    await get_radio_manager().sync_from_redis()
     await ws_manager.start_redis_listener()
     # Écouteur de synchronisation du planning (réf. correctif "la modification
     # d'un planning ne se propage qu'au worker qui a reçu la requête") : même
@@ -78,12 +84,14 @@ async def lifespan(app: FastAPI):
     await start_schedule_sync_listener()
     for playback_manager in get_all_playback_managers().values():
         playback_manager.start_position_broadcast_loop()
+    get_radio_manager().start_position_broadcast_loop()
     yield
     # Shutdown : Arrêt propre du scheduler, du watcher et de Redis
     stop_scheduler()
     stop_watcher()
     for playback_manager in get_all_playback_managers().values():
         playback_manager.stop_position_broadcast_loop()
+    get_radio_manager().stop_position_broadcast_loop()
     await ws_manager.stop_redis_listener()
     await stop_schedule_sync_listener()
     await close_redis()
@@ -109,6 +117,8 @@ app.include_router(schedule.router)
 app.include_router(backgrounds.router)
 app.include_router(audio.router)
 app.include_router(audio_playlists.router)
+app.include_router(radio.router)
+app.include_router(radio_playlists.router)
 app.include_router(settings_router.router)
 app.include_router(logs.router)
 app.include_router(import_jobs.router)
@@ -236,6 +246,33 @@ async def stream_audio_track(
     if not track:
         raise HTTPException(status_code=404, detail="Piste audio non trouvée")
     return await _range_stream_response(Path(track.file_path), range, "audio/mpeg")
+
+
+@app.get("/api/radio/tracks/{track_id}/stream")
+async def stream_radio_track(
+    track_id: int,
+    range: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Flux audio d'un morceau radio. Type MIME déduit de l'extension (tous
+    formats web, réf. A2 : les non-web sont transcodés en .m4a à l'import)."""
+    track = db.query(RadioTrack).filter(RadioTrack.id == track_id).first()
+    if not track:
+        raise HTTPException(status_code=404, detail="Morceau non trouvé")
+    return await _range_stream_response(Path(track.file_path), range, content_type_for(track.file_path))
+
+
+@app.get("/api/radio/tracks/{track_id}/cover")
+async def stream_radio_cover(
+    track_id: int,
+    range: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Pochette d'un morceau radio (JPEG normalisé, extrait ID3 ou uploadé)."""
+    track = db.query(RadioTrack).filter(RadioTrack.id == track_id).first()
+    if not track or not track.cover_path:
+        raise HTTPException(status_code=404, detail="Pochette non trouvée")
+    return await _range_stream_response(Path(track.cover_path), range, "image/jpeg")
 
 
 # Montage des dossiers statiques requis

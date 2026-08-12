@@ -50,13 +50,14 @@ const JOB_POLL_INTERVAL_MS = 1500;
 // Types
 // ---------------------------------------------------------------------------
 
-export type UploadKind = "video" | "background" | "audio_files" | "audio_zip";
+export type UploadKind = "video" | "background" | "audio_files" | "audio_zip" | "radio_files" | "radio_zip";
 
 export interface PendingUploadSpec {
   kind: UploadKind;
-  /** Fichier unique — vidéo, fond animé, ou archive ZIP d'un cours audio. */
+  /** Fichier unique — vidéo, fond animé, ou archive ZIP (cours audio / radio). */
   file?: File;
-  /** Fichiers multiples — pistes MP3 d'un cours audio (kind "audio_files"). */
+  /** Fichiers multiples — pistes MP3 d'un cours audio ("audio_files") ou
+   *  morceaux de la bibliothèque radio ("radio_files"). */
   files?: File[];
   title: string;
   program?: string | null;
@@ -117,6 +118,8 @@ const UPLOAD_ENDPOINTS: Record<UploadKind, string> = {
   background: "/backgrounds/upload",
   audio_files: "/audio/upload",
   audio_zip: "/audio/upload-zip",
+  radio_files: "/radio/tracks/upload",
+  radio_zip: "/radio/tracks/upload-zip",
 };
 
 const STAGE_ICONS: Record<string, string> = {
@@ -149,11 +152,13 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
   const buildFormData = (task: UploadTask): FormData => {
     const formData = new FormData();
-    if (task.kind === "audio_files") {
+    if (task.kind === "audio_files" || task.kind === "radio_files") {
       (task.files ?? []).forEach((f) => formData.append("files", f));
     } else if (task.file) {
       formData.append("file", task.file);
     }
+    // Les endpoints radio n'attendent pas de `title` (métadonnées lues des tags
+    // ID3), mais l'ajouter est inoffensif (FastAPI ignore les champs non déclarés).
     formData.append("title", task.title);
     if (task.kind === "video" || task.kind === "audio_files" || task.kind === "audio_zip") {
       if (task.program) formData.append("program", task.program);
@@ -350,6 +355,8 @@ const KIND_LABELS: Record<UploadKind, string> = {
   background: "Fond animé",
   audio_files: "Cours audio",
   audio_zip: "Cours audio",
+  radio_files: "Musique radio",
+  radio_zip: "Musique radio",
 };
 
 function UploadFloatingPanel() {

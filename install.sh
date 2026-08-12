@@ -241,9 +241,13 @@ if $DO_UNINSTALL; then
         ok "Configuration, venv et build frontend retirés."
 
         if $DO_PURGE_DATA; then
-            if confirm "${RED}Supprimer aussi ${REPO_DIR}/data (vidéos, audio, fonds importés) ? IRRÉVERSIBLE.${RESET}"; then
+            if confirm "${RED}Supprimer aussi les médias importés (${REPO_DIR}/data et l'ancien ${REPO_DIR}/backend/data) ? IRRÉVERSIBLE.${RESET}"; then
                 run rm -rf "${REPO_DIR}/data"
-                warn "Médias importés supprimés."
+                # Ancien emplacement historique (réf. §10.1 cahier des charges
+                # Radio) : audio/fonds/logs pouvaient y résider avant unification
+                # — sans cette ligne ils survivaient à un --purge-data (orphelins).
+                run rm -rf "${REPO_DIR}/backend/data"
+                warn "Médias importés supprimés (nouvel et ancien emplacement)."
             else
                 echo "  Médias conservés (${REPO_DIR}/data)."
             fi
@@ -487,7 +491,17 @@ step "Configuration de production"
 # ---------------------------------------------------------------------------
 log "Écriture de ${CONFIG_FILE}"
 run mkdir -p "${CONFIG_DIR}"
-run mkdir -p "${REPO_DIR}/data/videos" "${REPO_DIR}/data/watched" "${REPO_DIR}/data/thumbnails"
+# Tous les dossiers média sous un unique arbre ${REPO_DIR}/data (réf. §10.1 du
+# cahier des charges Radio) : avant ce correctif, seuls videos/watched/
+# thumbnails étaient créés/déclarés, et audio/fonds/logs retombaient sur les
+# défauts relatifs à backend/ → données éclatées sur deux arbres.
+run mkdir -p \
+    "${REPO_DIR}/data/videos" "${REPO_DIR}/data/watched" "${REPO_DIR}/data/thumbnails" \
+    "${REPO_DIR}/data/backgrounds" "${REPO_DIR}/data/backgrounds_watched" \
+    "${REPO_DIR}/data/audio" "${REPO_DIR}/data/audio_watched" \
+    "${REPO_DIR}/data/radio" "${REPO_DIR}/data/radio_covers" \
+    "${REPO_DIR}/data/radio_announcements" "${REPO_DIR}/data/radio_watched" \
+    "${REPO_DIR}/data/logs"
 run chown -R "${TARGET_USER}:${TARGET_USER}" "${REPO_DIR}/data"
 
 write_file "${CONFIG_FILE}" <<EOF
@@ -502,6 +516,19 @@ database_url = "sqlite:///${REPO_DIR}/data/database.db"
 media_dir = "${REPO_DIR}/data/videos"
 watch_dir = "${REPO_DIR}/data/watched"
 thumbnails_dir = "${REPO_DIR}/data/thumbnails"
+backgrounds_dir = "${REPO_DIR}/data/backgrounds"
+backgrounds_watch_dir = "${REPO_DIR}/data/backgrounds_watched"
+audio_dir = "${REPO_DIR}/data/audio"
+audio_watch_dir = "${REPO_DIR}/data/audio_watched"
+# Module Radio (réf. docs/cahier-des-charges-radio.md) : sous-système musical
+# indépendant, dossiers séparés des cours audio coach.
+radio_dir = "${REPO_DIR}/data/radio"
+radio_covers_dir = "${REPO_DIR}/data/radio_covers"
+radio_announcements_dir = "${REPO_DIR}/data/radio_announcements"
+radio_watch_dir = "${REPO_DIR}/data/radio_watched"
+
+[logs]
+logs_dir = "${REPO_DIR}/data/logs"
 
 [server]
 host = "0.0.0.0"
@@ -512,6 +539,18 @@ wait_time_between_courses = 10
 volume_default = 100
 EOF
 ok "configuration écrite"
+
+# Convergence des installations antérieures (réf. §10.1 du cahier des charges
+# Radio) : jusqu'ici audio/fonds/logs pouvaient résider sous backend/data. On
+# le signale et on oriente vers le script de migration dédié (opt-in, sauvegarde
+# la base avant toute réécriture, à lancer backend arrêté) plutôt que de
+# relocaliser automatiquement des données de production en plein install.
+if [[ -d "${REPO_DIR}/backend/data" ]]; then
+    warn "Données héritées détectées dans ${REPO_DIR}/backend/data (ancien emplacement)."
+    warn "Pour les unifier sous ${REPO_DIR}/data, arrête le backend puis lance :"
+    warn "  ${VENV_DIR}/bin/python ${REPO_DIR}/scripts/migrate_unify_data_dirs.py --dry-run"
+    warn "puis à nouveau sans --dry-run une fois le plan vérifié."
+fi
 step_done
 
 # ---------------------------------------------------------------------------

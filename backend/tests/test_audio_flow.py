@@ -192,7 +192,9 @@ class TestAudioFlow(unittest.IsolatedAsyncioTestCase):
         # Une vidéo classique doit pouvoir prendre le relais sur le mode coach (action manuelle, pas une programmation)
         await manager.load(video_id=99, title="RPM 100", duration_seconds=2700.0)
         self.assertIsNone(manager.state["current_audio_course"])
-        self.assertEqual(manager.state["state"], "countdown")
+        # Bascule directe en lecture (plus de compte à rebours serveur, réf.
+        # refactor "retrait du minuteur autonome").
+        self.assertEqual(manager.state["state"], "playing")
 
     async def test_06_priority_rule_f10_7_defers_schedule_during_coach_mode(self):
         # Vidéo cible d'une programmation qui va se déclencher pendant le mode coach
@@ -222,7 +224,8 @@ class TestAudioFlow(unittest.IsolatedAsyncioTestCase):
             broadcast_payloads.append(data)
 
         from app import playback_manager as playback_manager_module
-        manager = playback_manager_module.init_playback_manager(mock_broadcast)
+        playback_manager_module.init_playback_managers(mock_broadcast)
+        manager = playback_manager_module.get_playback_manager()
 
         tracks = [{"id": 1, "number": 1, "title": "Warm Up", "duration_seconds": 300.0}]
         await manager.load_audio_course(1, "RPM 110", "RPM", None, tracks)

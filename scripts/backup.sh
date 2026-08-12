@@ -45,6 +45,9 @@ print(json.dumps({
     "backgrounds_dir": settings.backgrounds_dir,
     "audio_dir": settings.audio_dir,
     "thumbnails_dir": settings.thumbnails_dir,
+    "radio_dir": settings.radio_dir,
+    "radio_covers_dir": settings.radio_covers_dir,
+    "radio_announcements_dir": settings.radio_announcements_dir,
 }))
 ')"
 
@@ -70,7 +73,7 @@ fi
 log "Copie de la configuration (${CONFIG_FILE})"
 [[ -f "${CONFIG_FILE}" ]] && cp "${CONFIG_FILE}" "${WORK_DIR}/backup/config.toml"
 
-for key in media_dir backgrounds_dir audio_dir thumbnails_dir; do
+for key in media_dir backgrounds_dir audio_dir thumbnails_dir radio_dir radio_covers_dir radio_announcements_dir; do
     dir="$(echo "${PATHS_JSON}" | python3 -c "import json,sys; print(json.load(sys.stdin)[\"${key}\"])")"
     if [[ -d "${dir}" ]]; then
         log "Copie de ${key} (${dir})"

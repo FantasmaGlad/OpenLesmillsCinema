@@ -25,14 +25,21 @@ def _apply_remote_message(data: dict) -> None:
     event = data.get("event")
     try:
         if event == "state_change":
-            from app.playback_manager import get_playback_manager
             # Routage par canal (réf. mission "tableaux de bord Câblé /
             # Réseau") : chaque état diffusé porte son canal d'origine, à
             # appliquer au gestionnaire correspondant de CE worker. Absence
             # de champ = message d'une version antérieure → canal câblé.
-            get_playback_manager(data.get("channel") or "cable").apply_remote_state(
-                data.get("data") or {}, data.get("origin")
-            )
+            channel = data.get("channel") or "cable"
+            if channel == "radio":
+                # 3e canal radio (réf. docs/cahier-des-charges-radio.md L3) :
+                # moteur indépendant du câblé/réseau.
+                from app.radio_manager import get_radio_manager
+                get_radio_manager().apply_remote_state(data.get("data") or {}, data.get("origin"))
+            else:
+                from app.playback_manager import get_playback_manager
+                get_playback_manager(channel).apply_remote_state(
+                    data.get("data") or {}, data.get("origin")
+                )
     except RuntimeError:
         pass
 

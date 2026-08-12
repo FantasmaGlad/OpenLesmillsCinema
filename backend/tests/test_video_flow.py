@@ -34,13 +34,18 @@ class TestVideoFlow(unittest.TestCase):
         cls.dummy_incompatible_path = str(Path(settings.watch_dir) / "test_Sprint_35_incompatible.mkv")
 
         print("Generating compatible test video with ffmpeg...")
-        # H264 + AAC MP4 (Direct Play compatible)
+        # H264 + AAC MP4 (Direct Play compatible). `-movflags +faststart` place
+        # l'atome moov en tête : sans lui, check_compatibility déclencherait un
+        # remux_faststart (réf. correctif "kiosk/réseau figé sur la première
+        # frame") — une vidéo réellement optimisée web ne nécessite aucune
+        # normalisation, ce que ce test valide.
         cmd_comp = [
             "ffmpeg", "-y",
             "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
             "-f", "lavfi", "-i", "sine=frequency=1000:duration=1",
             "-c:v", "libx264", "-c:a", "aac",
             "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
             cls.dummy_compatible_path
         ]
         subprocess.run(cmd_comp, capture_output=True, check=True)

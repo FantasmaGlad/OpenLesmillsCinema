@@ -106,6 +106,10 @@ def init_db():
         settings.backgrounds_watch_dir,
         settings.audio_dir,
         settings.audio_watch_dir,
+        settings.radio_dir,
+        settings.radio_covers_dir,
+        settings.radio_announcements_dir,
+        settings.radio_watch_dir,
         settings.logs_dir,
     ]:
         Path(path_str).mkdir(parents=True, exist_ok=True)

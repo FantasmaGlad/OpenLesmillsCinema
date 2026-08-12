@@ -27,7 +27,7 @@ from app.models import (
     ScheduleType,
     Video,
 )
-from app.playback_manager import init_playback_manager
+from app.playback_manager import init_playback_managers, get_playback_manager
 from app.routers.playback import dismiss_interrupted_state, resume_interrupted_state
 from app.routers.schedule import (
     OverrideInput,
@@ -91,6 +91,21 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
         )
         self.db.commit()
 
+    async def asyncSetUp(self):
+        # Isolation Redis : fire_schedule pose un verrou anti-double-déclenchement
+        # (schedule:firelock:{id}:{bucket}, TTL 10 s, réf. scheduler_manager.
+        # _acquire_fire_lock) qui survit dans Redis d'un test à l'autre. Les ids
+        # de programmation étant réutilisés (table vidée à chaque tearDown), un
+        # test qui refire un id déjà tiré < 10 s plus tôt serait dédupliqué à
+        # tort — l'interruption ne serait alors jamais sauvegardée. On purge donc
+        # ces verrous avant chaque test (uniquement ces clés, pas de flush global
+        # qui viderait le Redis partagé du poste de dev).
+        from app.utils.redis_client import get_redis
+        redis = get_redis()
+        keys = await redis.keys("schedule:firelock:*")
+        if keys:
+            await redis.delete(*keys)
+
     def tearDown(self):
         stop_scheduler()
         self.db.query(PlaybackState).delete()
@@ -104,7 +119,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
 
     async def test_schedule_crud_and_validation(self):
         future = datetime.now(timezone.utc) + timedelta(days=3)
-        once = create_schedule(
+        once = await create_schedule(
             ScheduleInput(
                 target_type=ScheduleTargetType.video,
                 target_id=self.video1.id,
@@ -125,7 +140,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
                 self.db,
             )
 
-        recurring = create_schedule(
+        recurring = await create_schedule(
             ScheduleInput(
                 target_type=ScheduleTargetType.playlist,
                 target_id=self.playlist.id,
@@ -139,10 +154,10 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recurring["time_of_day"], "18:30")
         self.assertEqual(recurring["target_title"], "Enchainement test")
 
-        self.assertEqual(len(list_schedules(self.db)), 2)
+        self.assertEqual(len(list_schedules(db=self.db)), 2)
         self.assertEqual(get_schedule(recurring["id"], self.db)["id"], recurring["id"])
 
-        updated = update_schedule(
+        updated = await update_schedule(
             recurring["id"],
             ScheduleInput(
                 target_type=ScheduleTargetType.playlist,
@@ -158,7 +173,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
 
         # Validations
         with self.assertRaises(HTTPException):
-            create_schedule(
+            await create_schedule(
                 ScheduleInput(
                     target_type=ScheduleTargetType.video,
                     target_id=self.video1.id,
@@ -168,7 +183,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
                 self.db,
             )
         with self.assertRaises(HTTPException):
-            create_schedule(
+            await create_schedule(
                 ScheduleInput(
                     target_type=ScheduleTargetType.video,
                     target_id=self.video1.id,
@@ -178,7 +193,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
                 self.db,
             )
         with self.assertRaises(HTTPException):
-            create_schedule(
+            await create_schedule(
                 ScheduleInput(
                     target_type=ScheduleTargetType.video,
                     target_id=self.video1.id,
@@ -189,7 +204,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
                 self.db,
             )
         with self.assertRaises(HTTPException):
-            create_schedule(
+            await create_schedule(
                 ScheduleInput(
                     target_type=ScheduleTargetType.video,
                     target_id=self.video1.id,
@@ -200,7 +215,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
                 self.db,
             )
         with self.assertRaises(HTTPException):
-            create_schedule(
+            await create_schedule(
                 ScheduleInput(
                     target_type=ScheduleTargetType.video,
                     target_id=self.video1.id,
@@ -211,7 +226,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
                 self.db,
             )
         with self.assertRaises(HTTPException):
-            create_schedule(
+            await create_schedule(
                 ScheduleInput(
                     target_type=ScheduleTargetType.video,
                     target_id=999999,
@@ -229,17 +244,17 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(override["action"], OverrideAction.cancelled)
 
-        delete_schedule(recurring["id"], self.db)
+        await delete_schedule(recurring["id"], self.db)
         self.assertIsNone(self.db.query(Schedule).filter_by(id=recurring["id"]).first())
         self.assertEqual(
             self.db.query(ScheduleOverride).filter_by(schedule_id=recurring["id"]).count(), 0
         )
 
-        delete_schedule(once["id"], self.db)
+        await delete_schedule(once["id"], self.db)
 
     async def test_expand_occurrences_with_overrides(self):
         anchor = date(2026, 7, 16)  # jeudi (cohérent avec la date système de référence)
-        created = create_schedule(
+        created = await create_schedule(
             ScheduleInput(
                 target_type=ScheduleTargetType.video,
                 target_id=self.video1.id,
@@ -282,11 +297,11 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(occurrences[2]["title"], "Sprint 35")
         self.assertEqual(occurrences[2]["target_id"], self.video2.id)
 
-    def test_next_schedule_skips_cancelled_occurrence(self):
+    async def test_next_schedule_skips_cancelled_occurrence(self):
         tomorrow = date.today() + timedelta(days=1)
         day_after = date.today() + timedelta(days=2)
 
-        recurring = create_schedule(
+        recurring = await create_schedule(
             ScheduleInput(
                 target_type=ScheduleTargetType.video,
                 target_id=self.video1.id,
@@ -302,7 +317,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
             self.db,
         )
 
-        create_schedule(
+        await create_schedule(
             ScheduleInput(
                 target_type=ScheduleTargetType.video,
                 target_id=self.video2.id,
@@ -312,7 +327,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
             self.db,
         )
 
-        result = get_next_schedule(self.db)
+        result = get_next_schedule(db=self.db)
         self.assertIsNotNone(result)
         self.assertEqual(result["title"], "Sprint 35")
 
@@ -322,15 +337,16 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
         async def mock_broadcast(payload):
             broadcasts.append(payload)
 
-        manager = init_playback_manager(mock_broadcast)
+        init_playback_managers(mock_broadcast)
+        manager = get_playback_manager()
 
         # Simule une lecture manuelle en cours (video1 à 42s).
         await manager.load(
-            self.video1.id, self.video1.title, self.video1.duration_seconds, self.video1.program, skip_countdown=True
+            self.video1.id, self.video1.title, self.video1.duration_seconds, self.video1.program
         )
         manager.state["position_seconds"] = 42.0
 
-        scheduled = create_schedule(
+        scheduled = await create_schedule(
             ScheduleInput(
                 target_type=ScheduleTargetType.video,
                 target_id=self.video2.id,
@@ -353,7 +369,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(interrupted.cause, "schedule")
 
         # Reprise manuelle depuis l'interface.
-        await resume_interrupted_state(self.db)
+        await resume_interrupted_state(db=self.db)
         self.assertEqual(manager.state["current_video"]["id"], self.video1.id)
         self.assertEqual(manager.state["position_seconds"], 42.0)
         self.assertIsNone(self.db.query(PlaybackState).order_by(PlaybackState.id.desc()).first())
@@ -364,12 +380,13 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
         async def mock_broadcast(payload):
             broadcasts.append(payload)
 
-        manager = init_playback_manager(mock_broadcast)
+        init_playback_managers(mock_broadcast)
+        manager = get_playback_manager()
         await manager.load(
-            self.video1.id, self.video1.title, self.video1.duration_seconds, self.video1.program, skip_countdown=True
+            self.video1.id, self.video1.title, self.video1.duration_seconds, self.video1.program
         )
 
-        scheduled = create_schedule(
+        scheduled = await create_schedule(
             ScheduleInput(
                 target_type=ScheduleTargetType.video,
                 target_id=self.video2.id,
@@ -381,7 +398,7 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
         await fire_schedule(scheduled["id"])
         self.assertIsNotNone(self.db.query(PlaybackState).first())
 
-        dismiss_interrupted_state(self.db)
+        dismiss_interrupted_state(db=self.db)
         self.assertIsNone(self.db.query(PlaybackState).first())
         # L'abandon ne relance pas la vidéo interrompue.
         self.assertEqual(manager.state["current_video"]["id"], self.video2.id)
@@ -392,10 +409,11 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
         async def mock_broadcast(payload):
             broadcasts.append(payload)
 
-        manager = init_playback_manager(mock_broadcast)
+        init_playback_managers(mock_broadcast)
+        manager = get_playback_manager()
         today = date.today()
 
-        recurring = create_schedule(
+        recurring = await create_schedule(
             ScheduleInput(
                 target_type=ScheduleTargetType.video,
                 target_id=self.video1.id,
@@ -423,11 +441,12 @@ class TestScheduleFlow(unittest.IsolatedAsyncioTestCase):
         async def mock_broadcast(payload):
             broadcasts.append(payload)
 
-        manager = init_playback_manager(mock_broadcast)
+        init_playback_managers(mock_broadcast)
+        manager = get_playback_manager()
 
         start_scheduler()
         run_at = datetime.now(timezone.utc) + timedelta(seconds=1.5)
-        create_schedule(
+        await create_schedule(
             ScheduleInput(
                 target_type=ScheduleTargetType.video,
                 target_id=self.video1.id,

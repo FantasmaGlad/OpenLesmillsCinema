@@ -105,6 +105,10 @@ _STORAGE_TRACKED_DIRS = (
     "backgrounds_watch_dir",
     "audio_dir",
     "audio_watch_dir",
+    "radio_dir",
+    "radio_covers_dir",
+    "radio_announcements_dir",
+    "radio_watch_dir",
     "logs_dir",
 )
 

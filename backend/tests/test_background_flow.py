@@ -104,12 +104,15 @@ class TestBackgroundFlow(unittest.IsolatedAsyncioTestCase):
         # Lancer un fond animé : bascule immédiate, sans compte à rebours (réf. F9.2)
         await manager.load_background(1, "Ambience Loop")
         self.assertEqual(manager.state["state"], "background")
-        self.assertEqual(manager.state["current_background"], {"id": 1, "title": "Ambience Loop"})
+        self.assertEqual(manager.state["current_background"], {"id": 1, "title": "Ambience Loop", "is_image": False})
         self.assertIsNone(manager.state["current_video"])
 
         # Une programmation vidéo doit pouvoir prendre le relais sur un fond animé (F9.2 "prise de relais")
         await manager.load(video_id=42, title="RPM 100", duration_seconds=2700.0)
-        self.assertEqual(manager.state["state"], "countdown")
+        # Bascule directe en lecture : le compte à rebours serveur a été retiré,
+        # le pacing est désormais l'animation Lancement.mp4 côté kiosk (réf.
+        # refactor "retrait du minuteur autonome").
+        self.assertEqual(manager.state["state"], "playing")
         self.assertIsNone(manager.state["current_background"])
         self.assertEqual(manager.state["current_video"]["id"], 42)
 
