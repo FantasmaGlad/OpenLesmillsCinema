@@ -14,6 +14,7 @@ from app.models import (
     OverrideAction,
     Playlist,
     PlaybackState,
+    RadioPlaylist,
     Schedule,
     ScheduleOverride,
     ScheduleTargetType,
@@ -53,6 +54,10 @@ def _job_id(schedule_id: int) -> str:
     return f"schedule-{schedule_id}"
 
 
+def _job_id_end(schedule_id: int) -> str:
+    return f"schedule-{schedule_id}-end"
+
+
 def ensure_utc(value: datetime) -> datetime:
     """
     SQLite ne conserve pas le fuseau des datetimes stockés : une valeur aware
@@ -79,6 +84,9 @@ def resolve_target_title(
     if target_type == ScheduleTargetType.video:
         video = db.query(Video).filter(Video.id == target_id).first()
         return (video.title, video.program) if video else (None, None)
+    if target_type == ScheduleTargetType.radio_playlist:
+        radio_playlist = db.query(RadioPlaylist).filter(RadioPlaylist.id == target_id).first()
+        return (radio_playlist.name, None) if radio_playlist else (None, None)
     playlist = db.query(Playlist).filter(Playlist.id == target_id).first()
     return (playlist.name, None) if playlist else (None, None)
 
@@ -195,12 +203,90 @@ def expand_occurrences(
     return results
 
 
+def _radio_track_dict(track) -> dict:
+    """Même forme que routers/playback.py::_radio_track_dict — dupliqué
+    volontairement plutôt que partagé entre les deux modules (fonction
+    minuscule, évite un couplage supplémentaire sur un fichier partagé et
+    sensible)."""
+    return {
+        "id": track.id,
+        "title": track.title,
+        "artist": track.artist,
+        "album": track.album,
+        "duration_seconds": track.duration_seconds,
+        "cover_url": f"/radio/tracks/{track.id}/cover" if track.cover_path else None,
+    }
+
+
+async def _launch_radio_target(db: Session, playlist_id: int) -> None:
+    """Lance une playlist radio EN BOUCLE (réf. lot L7, D9) : utilisé aussi
+    bien par l'auto-boot (ambiance par défaut) que par une programmation
+    Planning radio (fenêtre ou 24/7) — les deux doivent boucler plutôt que
+    s'arrêter en silence en fin de playlist."""
+    from app.radio_manager import get_radio_manager
+
+    playlist = db.query(RadioPlaylist).filter(RadioPlaylist.id == playlist_id).first()
+    if not playlist:
+        logger.warning(f"Cible programmée introuvable : playlist radio {playlist_id}")
+        return
+    sorted_items = sorted(playlist.items, key=lambda item: item.position)
+    tracks = [_radio_track_dict(item.track) for item in sorted_items if item.track]
+    if not tracks:
+        logger.warning(f"Playlist radio {playlist_id} vide, rien à lancer")
+        return
+    await get_radio_manager().load_playlist(playlist.id, playlist.name, tracks, repeat="playlist")
+
+
+async def autostart_default_radio_playlist() -> None:
+    """Auto-démarrage au boot (réf. lot L7, D10) : si le canal radio est au
+    repos et `radio_autostart_on_boot` est actif, charge la playlist
+    d'ambiance par défaut. À appeler une fois au démarrage du service, APRÈS
+    la reprise d'état Redis (sync_from_redis) — si un autre worker du même
+    lancement a déjà une lecture en cours, l'état repris n'est plus "idle" et
+    cet appel ne fait rien (pas de double lancement)."""
+    from app.config import settings as runtime_settings
+    from app.radio_manager import get_radio_manager
+
+    if not runtime_settings.radio_autostart_on_boot:
+        return
+    manager = get_radio_manager()
+    if manager.state["state"] != "idle":
+        return
+    db = SessionLocal()
+    try:
+        default_playlist = db.query(RadioPlaylist).filter(RadioPlaylist.is_default == True).first()  # noqa: E712
+        if default_playlist:
+            logger.info(f"Auto-démarrage radio : playlist d'ambiance par défaut « {default_playlist.name} »")
+            await _launch_radio_target(db, default_playlist.id)
+    finally:
+        db.close()
+
+
+async def _revert_radio_to_default(db: Session) -> None:
+    """Fin de fenêtre radio (réf. lot L7, D9) : retour à la playlist d'ambiance
+    par défaut, ou arrêt si aucune n'est définie."""
+    from app.radio_manager import get_radio_manager
+
+    default_playlist = db.query(RadioPlaylist).filter(RadioPlaylist.is_default == True).first()  # noqa: E712
+    if default_playlist:
+        await _launch_radio_target(db, default_playlist.id)
+    else:
+        await get_radio_manager().stop()
+
+
 async def _launch_target(
     db: Session, target_type: ScheduleTargetType, target_id: int, channel: str = "cable"
 ) -> None:
     """Lance la cible d'une programmation sur l'état de lecture de SON canal
     (réf. mission "tableaux de bord Câblé / Réseau" : un planning par canal,
     zéro interférence entre les deux lectures)."""
+    if target_type == ScheduleTargetType.radio_playlist:
+        # 3e canal radio (réf. lot L7), sous-système totalement indépendant
+        # (D8) : aucune des règles de conflit câblé/réseau ci-dessous ne
+        # s'applique — pas de mode coach, pas de "lecture manuelle en cours".
+        await _launch_radio_target(db, target_id)
+        return
+
     manager = get_playback_manager(channel)
     current = manager.snapshot()
 
@@ -298,7 +384,7 @@ async def _launch_target(
         await manager.load_playlist(playlist.id, playlist.name, items_data)
 
 
-async def _acquire_fire_lock(schedule_id: int) -> bool:
+async def _acquire_fire_lock(schedule_id: int | str) -> bool:
     """
     Avec plusieurs workers uvicorn (réf. plan perf/concurrence Phase 1), chaque
     processus démarre son propre AsyncIOScheduler à partir de la même règle
@@ -379,6 +465,25 @@ async def fire_schedule(schedule_id: int) -> None:
         db.close()
 
 
+async def fire_schedule_end(schedule_id: int) -> None:
+    """Callback APScheduler déclenché à la FIN d'une fenêtre radio (réf. lot
+    L7, D9/A1) : retour à la playlist d'ambiance par défaut. N'existe que pour
+    les programmations radio récurrentes avec `end_time` (pas de mode 24/7,
+    pas de programmation ponctuelle — cf. _sync_end_job)."""
+    lock_id = f"{schedule_id}-end"
+    if not await _acquire_fire_lock(lock_id):
+        logger.info(f"Fin de fenêtre {schedule_id} déjà prise en charge par un autre worker, ignorée ici")
+        return
+    db = SessionLocal()
+    try:
+        schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+        if not schedule or not schedule.active:
+            return
+        await _revert_radio_to_default(db)
+    finally:
+        db.close()
+
+
 def sync_schedule_job(schedule: Schedule) -> None:
     """(Ré)enregistre le job APScheduler d'une programmation, ou le retire si
     elle est inactive/déjà passée. Appelé après chaque création/mise à jour."""
@@ -427,6 +532,57 @@ def sync_schedule_job(schedule: Schedule) -> None:
         # une programmation manquée depuis des heures.
         misfire_grace_time=MISFIRE_GRACE_SECONDS,
     )
+    _sync_end_job(schedule)
+
+
+def _sync_end_job(schedule: Schedule) -> None:
+    """(Ré)enregistre le job de FIN de fenêtre radio (réf. lot L7), ou le
+    retire s'il ne s'applique pas. Portée volontairement restreinte aux
+    programmations radio RÉCURRENTES : une fenêtre ponctuelle (schedule_type
+    "once") ne revient pas automatiquement au défaut — limitation assumée
+    pour ce lot, le cas d'usage principal (programmation hebdomadaire d'une
+    salle) est récurrent. Fenêtres à cheval sur minuit non prises en charge
+    (cf. routers/schedule.py::_validate_and_normalize)."""
+    if _scheduler is None:
+        return
+    applicable = (
+        schedule.active
+        and schedule.target_type == ScheduleTargetType.radio_playlist
+        and schedule.schedule_type == ScheduleType.recurring
+    )
+    if not applicable:
+        remove_end_schedule_job(schedule.id)
+        return
+
+    try:
+        rule = json.loads(schedule.recurrence_rule)
+    except (TypeError, ValueError):
+        remove_end_schedule_job(schedule.id)
+        return
+
+    end_time = rule.get("end_time")
+    if rule.get("mode") == "24_7" or not end_time:
+        remove_end_schedule_job(schedule.id)
+        return
+
+    days = ",".join(str(d) for d in rule["days_of_week"])
+    hour, minute = (int(part) for part in end_time.split(":"))
+    trigger = CronTrigger(day_of_week=days, hour=hour, minute=minute, timezone=LOCAL_TZ)
+    _scheduler.add_job(
+        fire_schedule_end,
+        trigger=trigger,
+        id=_job_id_end(schedule.id),
+        args=[schedule.id],
+        replace_existing=True,
+        misfire_grace_time=MISFIRE_GRACE_SECONDS,
+    )
+
+
+def remove_end_schedule_job(schedule_id: int) -> None:
+    if _scheduler is None:
+        return
+    if _scheduler.get_job(_job_id_end(schedule_id)):
+        _scheduler.remove_job(_job_id_end(schedule_id))
 
 
 def remove_schedule_job(schedule_id: int) -> None:
@@ -434,6 +590,7 @@ def remove_schedule_job(schedule_id: int) -> None:
         return
     if _scheduler.get_job(_job_id(schedule_id)):
         _scheduler.remove_job(_job_id(schedule_id))
+    remove_end_schedule_job(schedule_id)
 
 
 # ---------------------------------------------------------------------------

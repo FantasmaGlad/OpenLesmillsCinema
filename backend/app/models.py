@@ -22,6 +22,9 @@ class ScheduleType(str, enum.Enum):
 class ScheduleTargetType(str, enum.Enum):
     video = "video"
     playlist = "playlist"
+    # Réf. lot L7 : intégration Planning du module Radio — une fenêtre
+    # (ou 24/7) remplace temporairement la playlist d'ambiance par défaut.
+    radio_playlist = "radio_playlist"
 
 
 class OverrideAction(str, enum.Enum):

@@ -23,6 +23,7 @@ from app.routers import (
 )
 from app.utils.radio_utils import content_type_for
 from app.scheduler_manager import (
+    autostart_default_radio_playlist,
     start_scheduler,
     start_schedule_sync_listener,
     stop_scheduler,
@@ -82,6 +83,9 @@ async def lifespan(app: FastAPI):
     # principe de reprise d'état que les canaux câblé/réseau ci-dessus, sur
     # son propre gestionnaire indépendant.
     await get_radio_manager().sync_from_redis()
+    # 24/7 (réf. lot L7, D10) : après reprise d'état — un worker qui rejoint
+    # un lancement de service déjà en cours ne doit rien auto-démarrer.
+    await autostart_default_radio_playlist()
     await ws_manager.start_redis_listener()
     # Écouteur de synchronisation du planning (réf. correctif "la modification
     # d'un planning ne se propage qu'au worker qui a reçu la requête") : même

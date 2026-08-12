@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models import (
     OverrideAction,
     Playlist,
+    RadioPlaylist,
     Schedule,
     ScheduleOverride,
     ScheduleTargetType,
@@ -30,6 +31,9 @@ from app.utils.activity_log import log_activity
 router = APIRouter(prefix="/api/schedule", tags=["schedule"])
 
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+# Réf. lot L7 : "radio" ajouté aux deux canaux existants (cable/network) —
+# 3e canal indépendant (D8), même mécanisme de planning par canal.
+_CHANNELS = ("cable", "network", "radio")
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +50,12 @@ class ScheduleInput(BaseModel):
     days_of_week: List[int] | None = None  # 0=lundi .. 6=dimanche
     time_of_day: str | None = None  # "HH:MM"
     active: bool = True
+    # Fenêtre radio (réf. lot L7, D9/A1) : sans objet pour target_type
+    # video/playlist, silencieusement ignorés dans ce cas. Uniquement pour
+    # les programmations RÉCURRENTES (cf. _validate_and_normalize) — fin de
+    # fenêtre, ou 24/7 (ne revient jamais seul au défaut).
+    end_time: str | None = None  # "HH:MM"
+    is_24_7: bool = False
 
 
 class ScheduleResponse(BaseModel):
@@ -61,6 +71,8 @@ class ScheduleResponse(BaseModel):
     time_of_day: str | None
     active: bool
     override_count: int
+    end_time: str | None = None
+    is_24_7: bool = False
 
 
 class OverrideInput(BaseModel):
@@ -99,6 +111,8 @@ class OccurrenceResponse(BaseModel):
 def _check_target_exists(db: Session, target_type: ScheduleTargetType, target_id: int) -> None:
     if target_type == ScheduleTargetType.video:
         found = db.query(Video).filter(Video.id == target_id).first()
+    elif target_type == ScheduleTargetType.radio_playlist:
+        found = db.query(RadioPlaylist).filter(RadioPlaylist.id == target_id).first()
     else:
         found = db.query(Playlist).filter(Playlist.id == target_id).first()
     if not found:
@@ -124,17 +138,37 @@ def _validate_and_normalize(data: ScheduleInput) -> tuple[datetime | None, str |
     if not data.time_of_day or not _TIME_RE.match(data.time_of_day):
         raise HTTPException(status_code=400, detail="Heure invalide (attendu HH:MM)")
 
-    rule = json.dumps({"days_of_week": sorted(set(data.days_of_week)), "time": data.time_of_day})
-    return None, rule
+    rule_dict: dict = {"days_of_week": sorted(set(data.days_of_week)), "time": data.time_of_day}
+
+    # Fenêtre radio (réf. lot L7) : sans effet pour les autres cibles (le
+    # champ reste ignoré côté modèle vidéo/playlist — pas de risque de
+    # régression, `_sync_end_job` ne l'exploite que pour radio_playlist).
+    if data.target_type == ScheduleTargetType.radio_playlist:
+        if data.is_24_7:
+            rule_dict["mode"] = "24_7"
+        elif data.end_time:
+            if not _TIME_RE.match(data.end_time):
+                raise HTTPException(status_code=400, detail="Heure de fin invalide (attendu HH:MM)")
+            if data.end_time <= data.time_of_day:
+                raise HTTPException(
+                    status_code=400,
+                    detail="L'heure de fin doit être après l'heure de début "
+                    "(fenêtres à cheval sur minuit non prises en charge)",
+                )
+            rule_dict["end_time"] = data.end_time
+
+    return None, json.dumps(rule_dict)
 
 
 def _to_response(db: Session, schedule: Schedule) -> dict:
     title, program = resolve_target_title(db, schedule.target_type, schedule.target_id)
-    days_of_week, time_of_day = None, None
+    days_of_week, time_of_day, end_time, is_24_7 = None, None, None, False
     if schedule.recurrence_rule:
         rule = json.loads(schedule.recurrence_rule)
         days_of_week = rule.get("days_of_week")
         time_of_day = rule.get("time")
+        end_time = rule.get("end_time")
+        is_24_7 = rule.get("mode") == "24_7"
     return {
         "id": schedule.id,
         "channel": schedule.channel or "cable",
@@ -148,6 +182,8 @@ def _to_response(db: Session, schedule: Schedule) -> dict:
         "time_of_day": time_of_day,
         "active": schedule.active,
         "override_count": len(schedule.overrides),
+        "end_time": end_time,
+        "is_24_7": is_24_7,
     }
 
 
@@ -159,7 +195,7 @@ def list_schedules(channel: str | None = None, db: Session = Depends(get_db)):
     """Liste des programmations, filtrable par canal de diffusion (réf.
     mission "tableaux de bord Câblé / Réseau" : un planning par canal)."""
     query = db.query(Schedule)
-    if channel in ("cable", "network"):
+    if channel in _CHANNELS:
         query = query.filter(Schedule.channel == channel)
     return [_to_response(db, s) for s in query.order_by(Schedule.id.desc()).all()]
 
@@ -175,7 +211,7 @@ def list_occurrences(start: datetime, end: datetime, channel: str | None = None,
     if end <= start:
         raise HTTPException(status_code=400, detail="La date de fin doit être postérieure à la date de début")
     query = db.query(Schedule).filter(Schedule.active == True)  # noqa: E712
-    if channel in ("cable", "network"):
+    if channel in _CHANNELS:
         query = query.filter(Schedule.channel == channel)
     return expand_occurrences(db, query.all(), start, end)
 
@@ -190,7 +226,7 @@ def get_next_schedule(channel: str | None = None, db: Session = Depends(get_db))
     now = datetime.now(timezone.utc)
     horizon = now + timedelta(days=60)
     query = db.query(Schedule).filter(Schedule.active == True)  # noqa: E712
-    if channel in ("cable", "network"):
+    if channel in _CHANNELS:
         query = query.filter(Schedule.channel == channel)
     schedules = query.all()
     occurrences = expand_occurrences(db, schedules, now, horizon)
@@ -220,7 +256,7 @@ async def create_schedule(data: ScheduleInput, db: Session = Depends(get_db)):
         run_at=run_at,
         recurrence_rule=recurrence_rule,
         active=data.active,
-        channel=data.channel if data.channel in ("cable", "network") else "cable",
+        channel=data.channel if data.channel in _CHANNELS else "cable",
     )
     db.add(schedule)
     db.commit()
@@ -250,7 +286,7 @@ async def update_schedule(schedule_id: int, data: ScheduleInput, db: Session = D
     schedule.run_at = run_at
     schedule.recurrence_rule = recurrence_rule
     schedule.active = data.active
-    schedule.channel = data.channel if data.channel in ("cable", "network") else "cable"
+    schedule.channel = data.channel if data.channel in _CHANNELS else "cable"
     db.commit()
     db.refresh(schedule)
     sync_schedule_job(schedule)

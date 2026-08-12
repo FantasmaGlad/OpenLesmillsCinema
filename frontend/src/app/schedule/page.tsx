@@ -6,9 +6,10 @@ import { useAppSettings } from "@/lib/AppSettingsContext";
 import type { Language } from "@/lib/i18n";
 import Icon from "@/components/Icon";
 
-type TargetType = "video" | "playlist";
+type TargetType = "video" | "playlist" | "radio_playlist";
 type ScheduleTypeValue = "once" | "recurring";
 type OverrideActionValue = "cancelled" | "replaced";
+type ChannelValue = "cable" | "network" | "radio";
 
 interface VideoSummary {
   id: number;
@@ -19,6 +20,13 @@ interface VideoSummary {
 }
 
 interface PlaylistSummary {
+  id: number;
+  name: string;
+  item_count: number;
+  total_duration_seconds: number;
+}
+
+interface RadioPlaylistSummary {
   id: number;
   name: string;
   item_count: number;
@@ -37,6 +45,9 @@ interface ScheduleDetail {
   time_of_day: string | null;
   active: boolean;
   override_count: number;
+  // Fenêtre radio (réf. lot L7) : sans objet pour video/playlist.
+  end_time: string | null;
+  is_24_7: boolean;
 }
 
 interface Occurrence {
@@ -121,9 +132,10 @@ export default function SchedulePage() {
   // et un pour le Réseau, distincts") : l'onglet actif filtre tout — vue
   // calendrier, vue liste — et toute création se fait sur ce canal. Ouvrable
   // directement sur un canal donné via ?channel= (liens des tableaux de bord).
-  const [channel, setChannel] = useState<"cable" | "network">(() => {
+  const [channel, setChannel] = useState<ChannelValue>(() => {
     if (typeof window === "undefined") return "cable";
-    return new URLSearchParams(window.location.search).get("channel") === "network" ? "network" : "cable";
+    const requested = new URLSearchParams(window.location.search).get("channel");
+    return requested === "network" || requested === "radio" ? requested : "cable";
   });
 
   // La grille calendrier à 7 colonnes n'est pas exploitable sur un écran de
@@ -148,6 +160,7 @@ export default function SchedulePage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [videos, setVideos] = useState<VideoSummary[]>([]);
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
+  const [radioPlaylists, setRadioPlaylists] = useState<RadioPlaylistSummary[]>([]);
   const [toast, setToast] = useState<ToastState | null>(null);
 
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -166,6 +179,9 @@ export default function SchedulePage() {
   const [formDaysOfWeek, setFormDaysOfWeek] = useState<number[]>([]);
   const [formTime, setFormTime] = useState<string>("18:00");
   const [formActive, setFormActive] = useState<boolean>(true);
+  // Fenêtre radio (réf. lot L7, D9/A1) : sans effet pour video/playlist.
+  const [formEndTime, setFormEndTime] = useState<string>("20:00");
+  const [formIs24_7, setFormIs24_7] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
 
   // Confirmation de suppression (destructive, réf. UX5.2)
@@ -221,6 +237,10 @@ export default function SchedulePage() {
       .then((res) => (res.ok ? res.json() : []))
       .then(setPlaylists)
       .catch(() => setPlaylists([]));
+    fetch(getApiUrl("/radio/playlists"), { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setRadioPlaylists)
+      .catch(() => setRadioPlaylists([]));
   }, []);
 
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -243,13 +263,16 @@ export default function SchedulePage() {
 
   const findVideo = (id: number) => videos.find((v) => v.id === id);
   const findPlaylist = (id: number) => playlists.find((p) => p.id === id);
+  const findRadioPlaylist = (id: number) => radioPlaylists.find((p) => p.id === id);
 
   const targetOptions: { id: number; label: string }[] = useMemo(
     () =>
       formTargetType === "video"
         ? videos.map((v) => ({ id: v.id, label: v.title }))
+        : formTargetType === "radio_playlist"
+        ? radioPlaylists.map((p) => ({ id: p.id, label: p.name }))
         : playlists.map((p) => ({ id: p.id, label: p.name })),
-    [formTargetType, videos, playlists]
+    [formTargetType, videos, playlists, radioPlaylists]
   );
 
   const filteredVideos = videos.filter((v) => v.title.toLowerCase().includes(librarySearch.toLowerCase()));
@@ -266,7 +289,9 @@ export default function SchedulePage() {
   // Tiroir : création / édition d'une programmation
   // --------------------------------------------------------------------
   const resetForm = () => {
-    setFormTargetType("video");
+    // Le canal radio n'a qu'un seul type de cible (réf. lot L7) : pas de
+    // toggle vidéo/playlist à afficher dans ce cas (cf. JSX du tiroir).
+    setFormTargetType(channel === "radio" ? "radio_playlist" : "video");
     setFormTargetId("");
     setFormTargetSearch("");
     setFormScheduleType("once");
@@ -274,6 +299,8 @@ export default function SchedulePage() {
     setFormDaysOfWeek([]);
     setFormTime("18:00");
     setFormActive(true);
+    setFormEndTime("20:00");
+    setFormIs24_7(false);
     setEditingOverrideCount(0);
   };
 
@@ -309,6 +336,8 @@ export default function SchedulePage() {
       setFormDaysOfWeek(data.days_of_week ?? []);
       setFormTime(data.time_of_day ?? "18:00");
       setFormActive(data.active);
+      setFormEndTime(data.end_time ?? "20:00");
+      setFormIs24_7(data.is_24_7 ?? false);
       setEditingOverrideCount(data.override_count);
       setDrawerOpen(true);
     } catch {
@@ -354,6 +383,12 @@ export default function SchedulePage() {
     } else {
       payload.days_of_week = formDaysOfWeek;
       payload.time_of_day = formTime;
+      // Fenêtre radio (réf. lot L7, D9/A1) : sans effet côté backend pour
+      // video/playlist, mais inutile de les envoyer hors de ce cas.
+      if (formTargetType === "radio_playlist") {
+        payload.is_24_7 = formIs24_7;
+        if (!formIs24_7) payload.end_time = formEndTime;
+      }
     }
 
     setIsSaving(true);
@@ -544,20 +579,32 @@ export default function SchedulePage() {
                       style={{ width: "100%", height: "26px", fontSize: "0.7rem" }}
                     >
                       <option value="">{t("schedule.replaceWith")}</option>
-                      <optgroup label={t("schedule.videosGroup")}>
-                        {videos.map((v) => (
-                          <option key={`v-${v.id}`} value={`video:${v.id}`}>
-                            {v.title}
-                          </option>
-                        ))}
-                      </optgroup>
-                      <optgroup label={t("schedule.playlistsGroup")}>
-                        {playlists.map((p) => (
-                          <option key={`p-${p.id}`} value={`playlist:${p.id}`}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </optgroup>
+                      {o.target_type === "radio_playlist" ? (
+                        <optgroup label={t("schedule.radioPlaylistsGroup")}>
+                          {radioPlaylists.map((p) => (
+                            <option key={`rp-${p.id}`} value={`radio_playlist:${p.id}`}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ) : (
+                        <>
+                          <optgroup label={t("schedule.videosGroup")}>
+                            {videos.map((v) => (
+                              <option key={`v-${v.id}`} value={`video:${v.id}`}>
+                                {v.title}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label={t("schedule.playlistsGroup")}>
+                            {playlists.map((p) => (
+                              <option key={`p-${p.id}`} value={`playlist:${p.id}`}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        </>
+                      )}
                     </select>
                     <button type="button" className="btn btn-primary" onClick={() => handleConfirmReplace(o)}>
                       {t("schedule.confirmReplace")}
@@ -613,6 +660,15 @@ export default function SchedulePage() {
           >
             <Icon name="wifi" size={16} />
             {t("schedule.channelTabNetwork")}
+          </button>
+          <button
+            className={`view-btn olc-press ${channel === "radio" ? "active" : ""}`}
+            onClick={() => setChannel("radio")}
+            title={t("schedule.channelRadioTitle")}
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 12px" }}
+          >
+            <Icon name="graphic_eq" size={16} />
+            {t("schedule.channelTabRadio")}
           </button>
         </div>
         <div className="week-nav">
@@ -720,8 +776,10 @@ export default function SchedulePage() {
         {/* Bibliothèque rapide (glisser-déposer sur un jour, UX3.14) : le
             glisser-déposer HTML5 n'existe pas au toucher, ce panneau reste
             surtout un raccourci de recherche sur téléphone — d'où la largeur
-            pleine plutôt que la colonne fixe du PC. */}
-        {libraryOpen && (
+            pleine plutôt que la colonne fixe du PC. Sans objet sur le canal
+            radio (réf. lot L7) : un seul type de cible (playlist radio), pas
+            de bibliothèque vidéo/playlist à glisser-déposer ici. */}
+        {libraryOpen && channel !== "radio" && (
           <div className="library-picker" style={{ width: isMobile ? "100%" : "260px", height: "auto", flexShrink: 0 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span className="form-label" style={{ margin: 0 }}>
@@ -778,7 +836,7 @@ export default function SchedulePage() {
             </div>
           </div>
         )}
-        {!libraryOpen && (
+        {!libraryOpen && channel !== "radio" && (
           <button
             className="btn btn-secondary"
             style={isMobile ? { width: "100%" } : { writingMode: "vertical-rl", height: "100%" }}
@@ -804,31 +862,38 @@ export default function SchedulePage() {
             </div>
             <form onSubmit={handleSaveSchedule} className="drawer-body drawer-form">
               <div className="form-group">
-                <label className="form-label">{t("schedule.targetLabel")}</label>
-                <div className="speed-group" style={{ width: "100%" }}>
-                  <button
-                    type="button"
-                    className={`speed-btn ${formTargetType === "video" ? "active" : ""}`}
-                    style={{ flex: 1 }}
-                    onClick={() => {
-                      setFormTargetType("video");
-                      setFormTargetId("");
-                    }}
-                  >
-                    {t("schedule.videoOption")}
-                  </button>
-                  <button
-                    type="button"
-                    className={`speed-btn ${formTargetType === "playlist" ? "active" : ""}`}
-                    style={{ flex: 1 }}
-                    onClick={() => {
-                      setFormTargetType("playlist");
-                      setFormTargetId("");
-                    }}
-                  >
-                    {t("schedule.playlistOption")}
-                  </button>
-                </div>
+                <label className="form-label">
+                  {channel === "radio" ? t("schedule.radioPlaylistLabel") : t("schedule.targetLabel")}
+                </label>
+                {/* Le canal radio n'a qu'un seul type de cible (playlist
+                    radio, réf. lot L7) : pas de toggle à afficher, contrairement
+                    au câblé/réseau qui choisissent entre vidéo et playlist. */}
+                {channel !== "radio" && (
+                  <div className="speed-group" style={{ width: "100%" }}>
+                    <button
+                      type="button"
+                      className={`speed-btn ${formTargetType === "video" ? "active" : ""}`}
+                      style={{ flex: 1 }}
+                      onClick={() => {
+                        setFormTargetType("video");
+                        setFormTargetId("");
+                      }}
+                    >
+                      {t("schedule.videoOption")}
+                    </button>
+                    <button
+                      type="button"
+                      className={`speed-btn ${formTargetType === "playlist" ? "active" : ""}`}
+                      style={{ flex: 1 }}
+                      onClick={() => {
+                        setFormTargetType("playlist");
+                        setFormTargetId("");
+                      }}
+                    >
+                      {t("schedule.playlistOption")}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
@@ -863,7 +928,11 @@ export default function SchedulePage() {
                 {formTargetId && (
                   <span style={{ fontSize: "0.75rem", color: "var(--accent-success)" }}>
                     {t("schedule.selectedLabel")}{" "}
-                    {formTargetType === "video" ? findVideo(Number(formTargetId))?.title : findPlaylist(Number(formTargetId))?.name}
+                    {formTargetType === "video"
+                      ? findVideo(Number(formTargetId))?.title
+                      : formTargetType === "radio_playlist"
+                      ? findRadioPlaylist(Number(formTargetId))?.name
+                      : findPlaylist(Number(formTargetId))?.name}
                   </span>
                 )}
               </div>
@@ -927,6 +996,40 @@ export default function SchedulePage() {
                       onChange={(e) => setFormTime(e.target.value)}
                     />
                   </div>
+
+                  {/* Fenêtre radio (réf. lot L7, D9/A1) : sans objet pour
+                      vidéo/playlist. 24/7 = la playlist remplace le défaut
+                      indéfiniment (pas de retour auto) ; sinon une heure de
+                      fin déclenche le retour à l'ambiance par défaut. */}
+                  {formTargetType === "radio_playlist" && (
+                    <>
+                      <div className="form-group" style={{ flexDirection: "row", alignItems: "center", gap: "10px" }}>
+                        <input
+                          type="checkbox"
+                          checked={formIs24_7}
+                          onChange={(e) => setFormIs24_7(e.target.checked)}
+                          style={{ width: "18px", height: "18px" }}
+                        />
+                        <label className="form-label" style={{ margin: 0 }}>
+                          {t("schedule.is247Label")}
+                        </label>
+                      </div>
+                      {!formIs24_7 && (
+                        <div className="form-group">
+                          <label className="form-label">{t("schedule.endTimeLabel")}</label>
+                          <input
+                            type="time"
+                            className="form-control"
+                            value={formEndTime}
+                            onChange={(e) => setFormEndTime(e.target.value)}
+                          />
+                          <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", margin: "4px 0 0" }}>
+                            {t("schedule.endTimeHint")}
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </>
               )}
 

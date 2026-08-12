@@ -189,9 +189,16 @@ class RadioPlaybackManager:
     # Commandes
     # ------------------------------------------------------------------
     async def load_playlist(self, playlist_id: int, name: str, tracks: list[dict],
-                            shuffle: bool | None = None, client_ts: float | None = None):
+                            shuffle: bool | None = None, client_ts: float | None = None,
+                            repeat: str | None = None):
+        """`repeat`, si fourni, force le mode de répétition APRÈS chargement
+        (réf. lot L7 : ambiance 24/7 par défaut et fenêtres de Planning radio,
+        toutes deux censées boucler plutôt que s'arrêter en silence en fin de
+        playlist — D9)."""
         if shuffle is not None:
             self.state["shuffle"] = bool(shuffle)
+        if repeat is not None:
+            self.state["repeat"] = repeat
         order = list(tracks)
         if self.state["shuffle"]:
             random.shuffle(order)
