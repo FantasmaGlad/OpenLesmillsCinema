@@ -171,3 +171,23 @@ def transcode_to_web(src_path: str, dest_path: str) -> None:
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"Transcodage échoué pour {src_path}: {res.stderr[-500:]}")
+
+
+def normalize_announcement_loudness(src_path: str, dest_path: str, target_lufs: float = -14.0) -> None:
+    """Normalise le loudness d'un rappel (filtre EBU R128 `loudnorm`) vers une
+    cible proche de la musique masterisée, puis ré-encode en AAC/.m4a.
+
+    Réf. correctif user « le rappel ne se joue pas à la même puissance, quasi
+    inaudible » : une voix brute a un loudness (LUFS) bien plus faible qu'une
+    musique masterisée à gain numérique égal — au même gain de lecture, elle
+    s'entend donc beaucoup moins. On aligne le loudness à l'import (comme le
+    fait une vraie radio pour ses voix-off), TP=-1.5 dBTP pour garder une marge
+    anti-saturation."""
+    cmd = [
+        "ffmpeg", "-y", "-i", src_path,
+        "-af", f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11",
+        "-c:a", "aac", "-b:a", "192k", dest_path,
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError(f"Normalisation loudness échouée pour {src_path}: {res.stderr[-500:]}")

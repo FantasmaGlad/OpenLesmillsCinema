@@ -23,6 +23,7 @@ from app.utils.radio_utils import (
     extract_embedded_cover,
     extract_radio_metadata,
     needs_transcode,
+    normalize_announcement_loudness,
     transcode_to_web,
 )
 
@@ -153,12 +154,11 @@ def import_radio_announcement(file_path: str, description: str, db) -> RadioAnno
     meta = extract_radio_metadata(str(src))
 
     Path(settings.radio_announcements_dir).mkdir(parents=True, exist_ok=True)
-    if needs_transcode(str(src)):
-        dest_path = Path(settings.radio_announcements_dir) / f"announcement_{file_id}.m4a"
-        transcode_to_web(str(src), str(dest_path))
-    else:
-        dest_path = Path(settings.radio_announcements_dir) / f"announcement_{file_id}{src.suffix.lower()}"
-        shutil.copy(str(src), dest_path)
+    # Normalisation loudness systématique (réf. correctif « rappel quasi
+    # inaudible ») : on ré-encode toujours en AAC/.m4a avec loudnorm, pour que
+    # le rappel s'entende à une puissance comparable à la musique masterisée.
+    dest_path = Path(settings.radio_announcements_dir) / f"announcement_{file_id}.m4a"
+    normalize_announcement_loudness(str(src), str(dest_path))
 
     announcement = RadioAnnouncement(
         file_path=str(dest_path), description=description, duration_seconds=meta["duration_seconds"],
