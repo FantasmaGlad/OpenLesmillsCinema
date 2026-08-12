@@ -8,7 +8,7 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { useAppSettings } from "@/lib/AppSettingsContext";
 import { useAutoFullscreen } from "@/lib/useAutoFullscreen";
 import { useClickSound } from "@/lib/useClickSound";
-import { navLinks as navLinkConfigs, footerNavLinks as footerNavLinkConfigs } from "@/lib/navLinks";
+import { navEntries, isNavGroup, footerNavLinks as footerNavLinkConfigs } from "@/lib/navLinks";
 import Icon from "@/components/Icon";
 import AppLogo from "@/components/AppLogo";
 
@@ -99,8 +99,67 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
   // quelles du design importé (surface "PC Admin") plutôt que les SVG
   // Heroicons d'origine, pour une identité visuelle cohérente avec le reste
   // de la refonte.
-  const navLinks = navLinkConfigs.map((link) => ({ ...link, label: t(link.labelKey) }));
   const footerLinks = footerNavLinkConfigs.map((link) => ({ ...link, label: t(link.labelKey) }));
+
+  // Regroupements dépliables (accordéon, réf. demande de réorganisation) :
+  // ouverts par défaut si la page courante est dans le groupe ; l'utilisateur
+  // peut ensuite plier/déplier à sa guise.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const toggleGroup = (key: string) => setOpenGroups((g) => ({ ...g, [key]: !(g[key] ?? false) }));
+
+  const renderNavEntries = (onNavigate?: () => void) =>
+    navEntries.map((entry, i) => {
+      if (isNavGroup(entry)) {
+        const groupActive = entry.children.some((c) => isNavLinkActive(pathname, c.href));
+        const open = openGroups[entry.groupKey] ?? groupActive;
+        return (
+          <div key={entry.groupKey}>
+            <button
+              type="button"
+              className="nav-link olc-press"
+              style={{ width: "100%", background: "transparent", border: "none", cursor: "pointer", font: "inherit", color: "inherit" }}
+              onClick={() => toggleGroup(entry.groupKey)}
+              aria-expanded={open}
+            >
+              <Icon name={entry.iconName} size={20} />
+              <span style={{ flex: 1, textAlign: "left" }}>{t(entry.groupKey)}</span>
+              <Icon name={open ? "expand_more" : "chevron_right"} size={18} />
+            </button>
+            {open && (
+              <div style={{ marginLeft: "22px", borderLeft: "1px solid var(--border-color)", paddingLeft: "8px" }}>
+                {entry.children.map((child) => {
+                  const isActive = isNavLinkActive(pathname, child.href);
+                  return (
+                    <Link
+                      key={child.href}
+                      href={child.href}
+                      onClick={onNavigate}
+                      className={`nav-link olc-press ${isActive ? "active" : ""}`}
+                    >
+                      <Icon name={child.iconName} size={20} />
+                      <span>{t(child.labelKey)}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      }
+      const isActive = entry.href === "/" ? pathname === "/" : isNavLinkActive(pathname, entry.href);
+      return (
+        <Link
+          key={entry.href}
+          href={entry.href}
+          onClick={onNavigate}
+          className={`nav-link olc-press olc-anim-in ${isActive ? "active" : ""}`}
+          style={{ animationDelay: `${i * 30}ms` }}
+        >
+          <Icon name={entry.iconName} size={20} />
+          <span>{t(entry.labelKey)}</span>
+        </Link>
+      );
+    });
 
   // L'écran kiosk, l'interface cinéma adhérents et le mode coach mobile
   // n'ont ni sidebar ni en-tête d'administration : plein écran dédié
@@ -120,8 +179,6 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
     : playbackState.state === "playing"
     ? "active"
     : "attente";
-
-  const allLinks = [...navLinks, ...footerLinks];
 
   if (isMobile) {
     // Réf. UX4.1 : pas de navigation permanente visible sur mobile — l'écran
@@ -147,14 +204,15 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
                 <AppLogo size={72} className="brand-logo" />
               </div>
               <nav className="mobile-drawer-nav">
-                {allLinks.map((link, i) => {
+                {renderNavEntries(() => setDrawerOpen(false))}
+                {footerLinks.map((link) => {
                   const isActive = link.href === "/" ? pathname === "/" : isNavLinkActive(pathname, link.href);
                   return (
                     <Link
                       key={link.href}
                       href={link.href}
-                      className={`nav-link olc-press olc-anim-in ${isActive ? "active" : ""}`}
-                      style={{ animationDelay: `${i * 30}ms` }}
+                      onClick={() => setDrawerOpen(false)}
+                      className={`nav-link olc-press ${isActive ? "active" : ""}`}
                     >
                       <Icon name={link.iconName} size={20} />
                       <span>{link.label}</span>
@@ -178,20 +236,7 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
             <AppLogo size={72} className="brand-logo" />
           </div>
           <nav className="sidebar-nav">
-            {navLinks.map((link, i) => {
-              const isActive = link.href === "/" ? pathname === "/" : isNavLinkActive(pathname, link.href);
-              return (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={`nav-link olc-press olc-anim-in ${isActive ? "active" : ""}`}
-                  style={{ animationDelay: `${i * 30}ms` }}
-                >
-                  <Icon name={link.iconName} size={20} />
-                  <span>{link.label}</span>
-                </Link>
-              );
-            })}
+            {renderNavEntries()}
           </nav>
         </div>
 
@@ -203,7 +248,7 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
                 key={link.href}
                 href={link.href}
                 className={`nav-link olc-press olc-anim-in ${isActive ? "active" : ""}`}
-                style={{ animationDelay: `${(navLinks.length + i) * 30}ms` }}
+                style={{ animationDelay: `${(navEntries.length + i) * 30}ms` }}
               >
                 <Icon name={link.iconName} size={20} />
                 <span>{link.label}</span>

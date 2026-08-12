@@ -461,6 +461,13 @@ export default function AudioPlaylistsPage() {
         </div>
       )}
 
+      {/* Bascule Vidéo / Audio (réf. fusion « Playlist » : une seule entrée de
+          menu, deux interfaces accessibles via ce switch). */}
+      <div className="view-toggle" style={{ marginBottom: "16px" }}>
+        <Link href="/playlists" className="view-btn">{t("playlists.tabVideo")}</Link>
+        <Link href="/audio-playlists" className="view-btn active">{t("playlists.tabAudio")}</Link>
+      </div>
+
       <div
         className="playlists-split-container"
         style={isMobile ? { flexDirection: "column", height: "auto", overflow: "visible" } : undefined}
