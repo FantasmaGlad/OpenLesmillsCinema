@@ -12,11 +12,12 @@ Ce document est écrit pour quiconque souhaite **comprendre, exploiter, modifier
 2. [Architecture générale (Multi-worker & Bus Redis)](#2-architecture-générale)
 3. [Modèle de données & Persistance SQLite](#3-modèle-de-données--persistance-sqlite)
 4. [Canaux de diffusion & Gestionnaire de lecture](#4-canaux-de-diffusion--gestionnaire-de-lecture)
-5. [Mode Audio Coach & Fonds animés](#5-mode-audio-coach--fonds-animés)
-6. [Script d'installation & Services systemd](#6-script-dinstallation--services-systemd)
-7. [Référence API HTTP & WebSockets](#7-référence-api-http--websockets)
-8. [Exploitation & Découverte Réseau (Wyse)](#8-exploitation--découverte-réseau-wyse)
-9. [Licence](#9-licence)
+5. [Module Radio](#5-module-radio)
+6. [Mode Audio Coach & Fonds animés](#6-mode-audio-coach--fonds-animés)
+7. [Script d'installation & Services systemd](#7-script-dinstallation--services-systemd)
+8. [Référence API HTTP & WebSockets](#8-référence-api-http--websockets)
+9. [Exploitation & Découverte Réseau (Wyse)](#9-exploitation--découverte-réseau-wyse)
+10. [Licence](#10-licence)
 
 ---
 
@@ -24,7 +25,7 @@ Ce document est écrit pour quiconque souhaite **comprendre, exploiter, modifier
 
 ### Stack technique
 
-- **Backend** : Python 3.11+, [FastAPI](https://fastapi.tiangolo.com/) + `uvicorn` (4 workers), [SQLAlchemy](https://www.sqlalchemy.org/) + `alembic` (migrations), SQLite (`data/database.db`), Redis (bus d'état Pub/Sub, verrous distribués), `APScheduler` (planification), `watchdog` (surveillance des dossiers d'import), `ffmpeg` / VAAPI (décodage matériel Intel).
+- **Backend** : Python 3.11+, [FastAPI](https://fastapi.tiangolo.com/) + `uvicorn` (4 workers), [SQLAlchemy](https://www.sqlalchemy.org/), SQLite (`data/database.db`), Redis (bus d'état Pub/Sub, verrous distribués), `APScheduler` (planification), `watchdog` (surveillance des dossiers d'import), `ffmpeg` / VAAPI (décodage matériel Intel), Web Audio API (crossfade radio, côté navigateur).
 - **Frontend** : [Next.js](https://nextjs.org/) 16 (App Router), React 19, TypeScript, CSS Vanilla (CSS Modules + Design Tokens), PWA (`manifest.json`), WebSockets.
 - **Exploitation & Kiosque** : Debian 13 (Trixie), Chromium en mode kiosque (X11 / `xinit`), `systemd` (services backend, kiosque, garde audio), `avahi-daemon` (découverte mDNS).
 
@@ -98,17 +99,18 @@ Le backend tourne en plusieurs workers `uvicorn` sous le même processus maître
 ### Arborescence backend (`backend/app/`)
 
 - `main.py` : Entrée de l'application FastAPI, initialisation des routes, des événements de démarrage (`boot_state.py`) et du serveur d'assets statiques.
-- `playback_manager.py` : Moteur de lecture multi-canal (gestion de l'état `PLAYING`, `PAUSED`, `IDLE`, minutage et reprise).
-- `scheduler_manager.py` : Gestionnaire `APScheduler` de la programmation horaire (récurrences, détections de conflits, décalages).
+- `playback_manager.py` : Moteur de lecture multi-canal câblé/réseau (gestion de l'état `PLAYING`, `PAUSED`, `IDLE`, minutage et reprise).
+- `radio_manager.py` : Moteur de lecture du canal Radio (§5) — état INDÉPENDANT de `playback_manager.py` (playlist de morceaux, pas vidéo/cours), même connexion WebSocket.
+- `scheduler_manager.py` : Gestionnaire `APScheduler` de la programmation horaire (récurrences, détections de conflits, décalages, fenêtres radio).
 - `models.py` : Déclarations SQLAlchemy ORM.
 - `config.py` : Gestionnaire de configuration dynamique.
-- `routers/` : Endpoints HTTP groupés par domaine (`videos`, `backgrounds`, `playlists`, `audio`, `audio_playlists`, `schedule`, `playback`, `settings`, `logs`, `import_jobs`).
+- `routers/` : Endpoints HTTP groupés par domaine (`videos`, `backgrounds`, `playlists`, `audio`, `audio_playlists`, `schedule`, `playback`, `settings`, `logs`, `import_jobs`, `radio`, `radio_playlists`, `radio_announcements`).
 
 ---
 
 ## 3. Modèle de données & Persistance SQLite
 
-Le schéma de données est géré par **SQLAlchemy** et migré via **Alembic**. Le stockage s'effectue dans un fichier SQLite unique (`data/database.db`).
+Le schéma de données est géré par **SQLAlchemy**. Il n'y a **pas d'Alembic actif** dans ce projet (dossier `alembic/versions/` vide) : les tables sont créées par `Base.metadata.create_all()` au démarrage, et l'ajout de colonnes sur des tables existantes passe par des micro-migrations idempotentes dans `database.py::_migrate_add_missing_columns`. Stockage dans un fichier SQLite unique (`data/database.db`).
 
 ### Entités principales
 
@@ -120,15 +122,18 @@ Le schéma de données est géré par **SQLAlchemy** et migré via **Alembic**. 
 - `playback_state` : État de lecture persisté par canal (*Câblé* et *Réseau*), incluant la sauvegarde des actions interrompues pour la reprise automatique.
 - `settings` : Clés/valeurs des paramètres modifiables à chaud depuis l'interface admin.
 - `activity_log` : Journal des événements fonctionnels et techniques du système.
+- `radio_tracks`, `radio_tags`, `radio_playlists` & `radio_playlist_items` : Bibliothèque musicale et playlists du module Radio (§5) — sous-système indépendant des cours vidéo/audio coach.
+- `radio_announcements` & `radio_announcement_rules` : Rappels de bienséance (annonces) et leurs règles de déclenchement.
 
 ---
 
 ## 4. Canaux de diffusion & Gestionnaire de lecture
 
-Le système pilote deux canaux de diffusion **strictement indépendants** :
+Le système pilote deux canaux de diffusion vidéo **strictement indépendants**, plus un 3ᵉ canal musical (§5) :
 
 1. **Canal Câblé (`channel=cable`)** : Canal d'affichage principal relié à la sortie vidéo physique du mini PC (écran salle / kiosque).
 2. **Canal Réseau (`channel=network`)** : Canal secondaire destiné à la diffusion réseau ou aux écrans auxiliaires.
+3. **Canal Radio (`channel=radio`)** : 3ᵉ canal, totalement indépendant des deux premiers (aucune interaction) — diffusion musicale continue sur un poste dédié. Géré par un gestionnaire d'état séparé (`radio_manager.py`), pas le `playback_manager` ci-dessous.
 
 ### Reprise après interruption (Resilience Rule)
 
@@ -139,7 +144,20 @@ Lorsqu'une programmation automatique (`scheduler`) doit démarrer alors qu'une l
 
 ---
 
-## 5. Mode Audio Coach & Fonds animés
+## 5. Module Radio
+
+Sous-système musical « type Spotify » **totalement indépendant** des cours vidéo/audio coach (canal `radio` dédié, tables `radio_*`, gestionnaire d'état `radio_manager.py`) — bibliothèque, playlists, lecture continue, crossfade et rappels sonores. Cahier des charges complet, décisions et découpage en lots : [`docs/cahier-des-charges-radio.md`](docs/cahier-des-charges-radio.md).
+
+- **Surfaces** : `/radio` (écran du poste dédié — affichage + contrôles, ouvert à la main dans un navigateur, pas de service kiosk systemd), onglet admin « Radio » (télécommande à distance sur `/radio-remote`), « Piste Audio Radio » (bibliothèque sur `/radio-library`), « Rappels » (annonces sur `/radio-announcements`), et un 3ᵉ onglet « Radio » sur la page Planning (`/schedule/?channel=radio`).
+- **Bibliothèque** : import tous formats audio (transcodage automatique de ce que le navigateur ne lit pas), pochettes extraites (ID3) ou manuelles, navigation par artiste/album/tags.
+- **Lecture** : continue, file d'attente, lecture aléatoire, répétition (piste/playlist), **crossfade** (Web Audio API — deux `<audio>` routés dans un graphe `MediaElementAudioSourceNode → GainNode → destination`, fondu démarré côté client en avance sur la confirmation serveur).
+- **Rappels** : annonces de bienséance avec description, règles de déclenchement (toutes les N musiques / toutes les X minutes / à heures fixes / manuel), insertion en attente de fin de piste ou par fondu immédiat (« duck » — réutilise le même graphe Web Audio que le crossfade).
+- **24/7 & Planning** : une playlist marquée par défaut tourne en boucle en permanence ; auto-démarrage au boot (`radio_autostart_on_boot`) ; le Planning peut y superposer des fenêtres horaires récurrentes (option 24/7) qui reviennent automatiquement à l'ambiance par défaut en fin de fenêtre.
+- **Config** (`radio_dir`, `radio_covers_dir`, `radio_announcements_dir`, `radio_watch_dir`, `radio_volume_default`, `radio_crossfade_seconds`, `radio_announcement_duck_level`, `radio_announcement_fade_ms`, `radio_autostart_on_boot`) : voir `config.py` — dossiers unifiés sous `${REPO_DIR}/data` par `install.sh` comme le reste des médias.
+
+---
+
+## 6. Mode Audio Coach & Fonds animés
 
 Le mode **Audio Coach** permet de diffuser des cours audio (pistes vocales / musique) sur l'équipement sonore de la salle tout en affichant un fond visuel dynamique sur l'écran.
 
@@ -149,7 +167,7 @@ Le mode **Audio Coach** permet de diffuser des cours audio (pistes vocales / mus
 
 ---
 
-## 6. Script d'installation & Services systemd
+## 7. Script d'installation & Services systemd
 
 L'installation de production s'effectue via le script shell idempotent `install.sh` sur Debian 13 (Trixie).
 
@@ -165,19 +183,22 @@ sudo ./install.sh
 | `--no-kiosk` | Installation du backend seul (sans Chromium X11 / audio) |
 | `--dry-run` | Prévisualisation des actions sans modification |
 | `--check` | Diagnostic de l'installation existante |
-| `--skip-packages` | Mise à jour du projet (post `git pull`) sans réinstaller les paquets `apt` |
+| `--skip-packages` | Mise à jour du projet (après déploiement du code, §9) sans réinstaller les paquets `apt` |
 | `--skip-build` | Ne reconstruit pas le frontend Next.js |
 | `--uninstall [--purge] [--purge-data]` | Désinstallation progressive du système |
 
 ### Services Systemd créés
 
-- `openlesmillscinema-backend.service` : API FastAPI Uvicorn sur le port 8000.
+- `openlesmillscinema-backend.service` : API FastAPI Uvicorn sur le port 8000 (4 workers).
 - `openlesmillscinema-kiosk.service` : Mode Kiosque Chromium plein écran sur `xinit` (X11).
-- `openlesmillscinema-guard.service` : Watchdog de surveillance du système et de l'audio.
+- `openlesmillscinema-audio-guard.service` : Watchdog de surveillance du système et de l'audio (silence hors session kiosque).
+- `openlesmillscinema-redirect.service` : Redirection nftables du port 80 vers 8000.
+
+Pas de service dédié pour le canal Radio (arbitrage A5, cf. §5) : `/radio` s'ouvre à la main dans un navigateur, sur le même backend.
 
 ---
 
-## 7. Référence API HTTP & WebSockets
+## 8. Référence API HTTP & WebSockets
 
 ### Endpoints HTTP (`/api`)
 
@@ -193,14 +214,16 @@ sudo ./install.sh
 | **Paramètres** | `/api/settings` | Configuration dynamique, sortie vidéo et espace de stockage |
 | **Imports** | `/api/import-jobs` | Suivi des tâches d'importation en arrière-plan |
 | **Logs** | `/api/logs` | Consultation et téléchargement des journaux système |
+| **Radio — Bibliothèque** | `/api/radio` | Morceaux (CRUD, artistes/albums/tags), playlists radio, état du canal (`/api/radio/state`) |
+| **Radio — Rappels** | `/api/radio/announcements`, `/api/radio/announcement-rules` | Annonces (import + description), règles de déclenchement, déclenchement manuel |
 
 ### WebSockets
 
-- `/ws/playback` : Diffusion en temps réel de l'état de lecture par canal (*position*, *durée*, *média courant*, décompte inter-cours).
+- `/ws/playback` : Diffusion en temps réel de l'état de lecture par canal — câblé, réseau **et radio** (`channel=radio`, même connexion, vocabulaire de commandes `radio_*` propre au canal musical) — *position*, *durée*, *média courant*, décompte inter-cours.
 
 ---
 
-## 8. Exploitation & Découverte Réseau (Wyse)
+## 9. Exploitation & Découverte Réseau (Wyse)
 
 Sur le réseau local, la machine Wyse de production (`pavilion-malefique` / Dell Wyse 5070) reçoit son adresse IP via **DHCP**.
 
@@ -222,13 +245,43 @@ Sur le réseau local, la machine Wyse de production (`pavilion-malefique` / Dell
 ```bash
 # Vérifier l'état des services systemd sur la Wyse
 ssh fanta@<WYSE_IP> "systemctl status openlesmillscinema-backend openlesmillscinema-kiosk"
-
-# Mettre à jour et redémarrer la Wyse
-ssh fanta@<WYSE_IP> "cd /home/fanta/OpenLesmillsCinema && git pull && sudo ./install.sh --skip-packages"
 ```
+
+### Déploiement sur la Wyse
+
+⚠️ **`git pull` ne fonctionne PAS sur la Wyse** : son réseau bloque GitHub entièrement (ports 22 **et** 443 vers github.com). Le dépôt `/home/fanta/OpenLesmillsCinema` sur la Wyse **n'est pas un clone git** — le déploiement se fait par copie (`rsync`) depuis un poste de dev sur le même réseau local, jamais par `git pull` sur la machine cible elle-même.
+
+```bash
+# 1. Depuis le poste de dev, sur le même LAN que la Wyse — toujours en
+#    --dry-run d'abord, vérifier qu'aucune ligne "deleting" ne touche data/ :
+rsync -a --delete --dry-run \
+  --exclude='.git/' --exclude='data/' --exclude='backend/data/' --exclude='backend/.venv/' \
+  --exclude='frontend/node_modules/' --exclude='frontend/.next/' --exclude='frontend/out/' \
+  --exclude='__pycache__/' --exclude='*.pyc' --exclude='*.db*' --exclude='*.log' \
+  --exclude='.claude/' --exclude='AGENTS.md' --exclude='CLAUDE.md' \
+  ./ fanta@<WYSE_IP>:/home/fanta/OpenLesmillsCinema/
+# (puis sans --dry-run une fois vérifié)
+
+# 2. Sur la Wyse : si le déploiement ajoute/modifie des dossiers média, des
+#    réglages de config.toml ou des services systemd, relancer l'installateur
+#    (idempotent, ne touche jamais data/ hors --uninstall --purge-data) :
+ssh fanta@<WYSE_IP> "cd /home/fanta/OpenLesmillsCinema && sudo ./install.sh --skip-packages -y"
+# Pour un changement de CODE SEUL (aucun nouveau dossier/réglage/service),
+# un simple rebuild suffit à la place de l'étape ci-dessus :
+#   ssh fanta@<WYSE_IP> "cd /home/fanta/OpenLesmillsCinema/frontend && npm run build"
+
+# 3. install.sh ne redémarre PAS un service déjà actif : redémarrage explicite
+#    pour charger le nouveau code (ces deux commandes sont NOPASSWD) :
+ssh fanta@<WYSE_IP> "sudo -n systemctl restart openlesmillscinema-backend.service && sudo -n systemctl restart openlesmillscinema-kiosk.service"
+
+# 4. Vérifier : santé de l'API, services actifs, espace disque de data/ inchangé
+ssh fanta@<WYSE_IP> "curl -s localhost:8000/api/health; systemctl is-active openlesmillscinema-backend openlesmillscinema-kiosk; du -sh /home/fanta/OpenLesmillsCinema/data"
+```
+
+Les commits restent locaux jusqu'à ce qu'une machine avec accès GitHub (hors LAN de la Wyse) les pousse sur `origin/main` — le déploiement ne dépend jamais de ce push.
 
 ---
 
-## 9. Licence
+## 10. Licence
 
 Ce projet est distribué sous licence Open Source **MIT**.
