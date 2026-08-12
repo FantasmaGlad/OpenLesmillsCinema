@@ -388,7 +388,17 @@ class PlaybackManager:
             # on prend le verrou pour dédoublonner l'enchaînement entre workers.
             if not advanced_here and not await acquire_tick_lock(lock_key, ttl_ms=800):
                 return
-            # Temps d'attente écoulé : lance la vidéo suivante
+            # Temps d'attente écoulé : lance la vidéo suivante. On détache CE
+            # task du manager AVANT l'appel (correctif "timer bloqué à 0 en
+            # prod") : _play_next_video() appelle _cancel_waiting(), qui
+            # annulerait sinon le task COURANT (lui-même) — la CancelledError
+            # serait alors levée au prochain await, à l'intérieur du load()
+            # suivant (persist Redis / broadcast). Résultat : l'état passait
+            # bien à "playing" en mémoire mais l'évènement "load" n'était
+            # JAMAIS diffusé au kiosk, qui restait figé sur « 0 ». En mettant
+            # self._waiting_task à None ici, _cancel_waiting() n'a plus rien à
+            # annuler et le broadcast aboutit.
+            self._waiting_task = None
             await self._play_next_video()
         except asyncio.CancelledError:
             pass
@@ -787,6 +797,11 @@ class PlaybackManager:
                     advanced_here = True
             if not advanced_here and not await acquire_tick_lock(lock_key, ttl_ms=800):
                 return
+            # Détache CE task AVANT d'enchaîner (même correctif que
+            # _run_waiting_period) : _goto_track() appelle
+            # _cancel_audio_chain_wait(), qui annulerait sinon le task courant
+            # et interromprait le broadcast "audio_next_track" ci-dessous.
+            self._audio_chain_wait_task = None
             self.state["audio_chain_wait_remaining"] = None
             idx = self.state["audio_track_index"]
             if idx is not None and self._goto_track(idx + 1):

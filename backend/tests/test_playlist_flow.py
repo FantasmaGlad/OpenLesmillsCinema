@@ -187,8 +187,10 @@ class TestPlaylistFlow(unittest.IsolatedAsyncioTestCase):
         pl = create_playlist(payload, self.db)
 
         ticks = []
+        events = []
 
         async def mock_broadcast(data):
+            events.append((data.get("cause"), data.get("data")))
             if data.get("cause") == "playlist_waiting_tick":
                 ticks.append(data["data"]["playlist_waiting_remaining"])
 
@@ -222,6 +224,14 @@ class TestPlaylistFlow(unittest.IsolatedAsyncioTestCase):
         self.assertLess(elapsed, 3.6, f"Décompte trop lent ({elapsed:.1f}s pour 2s d'attente)")
         # Le décompte est bien passé par 0 (dernier tick émis).
         self.assertIn(0.0, ticks)
+        # Correctif "timer bloqué à 0 en prod" (self-cancel du task d'attente) :
+        # l'évènement "load" du cours suivant doit avoir été réellement DIFFUSÉ
+        # (pas seulement l'état mémoire mis à jour) — sinon la CancelledError
+        # interrompt le broadcast et le kiosk reste figé sur « 0 ».
+        load_events = [d for (cause, d) in events if cause == "load"]
+        self.assertTrue(load_events, "aucun évènement 'load' diffusé pour le cours suivant")
+        self.assertEqual(load_events[-1]["current_video"]["id"], self.video2.id)
+        self.assertEqual(load_events[-1]["state"], "playing")
 
 
 if __name__ == "__main__":

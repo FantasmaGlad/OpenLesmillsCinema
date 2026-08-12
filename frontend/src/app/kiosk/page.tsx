@@ -350,9 +350,18 @@ export default function KioskPage() {
             };
             video.addEventListener("canplay", onVideoReady);
           } else {
-            // Même source : seek direct sans rechargement (repli si les
-            // métadonnées ne sont pas encore chargées, cf. seekWhenReady).
-            seekWhenReady(video, targetPosition);
+            // Même source : NE PAS recaler le kiosk PRIMAIRE (correctif
+            // "saccades sur le réseau"). Le primaire est la SOURCE de la
+            // position — il la rapporte au serveur avec ~1 s de retard (report
+            // throttlé à 1/s). Se recaler sur cette position à chaque resync
+            // (15 s) ou reconnexion le faisait sauter ~1 s en arrière, d'où des
+            // saccades périodiques (aggravées par les reconnexions WS sur un
+            // lien réseau instable). Seuls les miroirs se recalent, et
+            // uniquement au-delà d'un seuil de dérive — même logique que
+            // "position_tick" ci-dessous.
+            if (!isPrimaryRef.current && Math.abs(video.currentTime - targetPosition) > 1.5) {
+              seekWhenReady(video, targetPosition);
+            }
             if (targetPlaying && video.paused) tryPlay(video);
             else if (!targetPlaying && !video.paused) video.pause();
           }
