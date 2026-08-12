@@ -503,10 +503,10 @@ unifie l'arborescence et supprime le split.
 | **L1** ✅ | Import & bibliothèque : `radio_utils`/`radio_importer` (ID3 + pochette + transcodage tous formats), router `/api/radio` (tracks CRUD/artists/albums/tags), stream+cover dans main.py, watcher radio, kinds d'upload radio, onglet « Piste Audio Radio » (vue Morceaux : grille pochettes carrées + import + drawer d'édition métadonnées/pochette/tags). Vérifié en navigateur. | L0 |
 | **L2** ✅ | Playlists radio (`routers/radio_playlists.py` : CRUD, ajout, réordonnancement, playlist par défaut) + les 3 vues sur la page (Morceaux&Playlists / Artistes&Albums / Tags&Genres) avec filtres. Vérifié en navigateur. | L1 |
 | **L3** ✅ | Canal `radio` + moteur de lecture (`RadioPlaybackManager` indépendant) + état WS (réutilise `/ws/playback`, channel=radio) + onglet admin « Radio » (télécommande) — continu, file d'attente, shuffle, repeat (**sans** crossfade). Vérifié en navigateur. | L1 |
-| **L4** | Écran `/radio` (mise en page Spotify, affichage + contrôles) + thème + service kiosk poste dédié | L3 |
+| **L4** ✅ | Écran `/radio` (mise en page Spotify, affichage + contrôles) + poste dédié — pas de service kiosk systemd (arbitrage A5), écran de déverrouillage autoplay à la place. Vérifié en navigateur. | L3 |
 | **L5** | **Crossfade / gapless** (Web Audio API) sur `/radio` | L4 |
-| **L6** | **Rappels** : import + description + onglet dédié + règles (N / X min / heures fixes / manuel) + insertion (attente-fin / duck) + sélection aléatoire | L3 |
-| **L7** | 24/7 (playlist par défaut) + auto-boot + intégration Planning (fenêtres + revert) | L3 |
+| **L6** ✅ | **Rappels** : import + description + onglet dédié + règles (N / X min / heures fixes / manuel) + insertion (attente-fin / duck simple ramp `<audio>.volume`, le vrai Web Audio API reste pour L5) + sélection aléatoire. Vérifié en navigateur. | L3 |
+| **L7** ✅ | 24/7 (playlist par défaut, auto-boot) + intégration Planning (fenêtres récurrentes + retour auto, **pas** de fenêtre ponctuelle ni à cheval sur minuit — portée réduite assumée). Vérifié en navigateur (fenêtre réelle déclenchée + retour au défaut à la seconde près). | L3 |
 
 Chaque lot est livrable et vérifiable indépendamment (dev backend port 8001,
 frontend `npm run dev`, puis déploiement Wyse via rsync/ssh).
