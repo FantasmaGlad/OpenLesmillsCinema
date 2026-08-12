@@ -182,7 +182,6 @@ export default function DashboardScreen({ channel }: Props) {
   const [isResuming, setIsResuming] = useState(false);
   const [upcoming, setUpcoming] = useState<OccurrenceSummary[]>([]);
   const [backgrounds, setBackgrounds] = useState<BackgroundSummary[]>([]);
-  const [selectedBackgroundId, setSelectedBackgroundId] = useState<string>("");
 
   const isCable = channel === "cable";
   // Sortie active de CE canal uniquement : le verrou cinéma et le switch
@@ -651,39 +650,23 @@ export default function DashboardScreen({ channel }: Props) {
         )}
       </div>
 
-      {/* Raccourcis fond animé / mode coach : pilotent tous deux l'écran
-          kiosk, sans objet en mode cinéma (l'écran affiche le libre-service)
-          — masqués plutôt que juste désactivés (réf. retour utilisateur
-          "masquer les fonctionnalités non disponibles en mode cinéma"). */}
-      {!channelCinema && (
+      {/* Raccourci mode coach : pilote l'écran kiosk, sans objet en mode
+          cinéma (l'écran affiche le libre-service) — masqué plutôt que juste
+          désactivé (réf. retour utilisateur "masquer les fonctionnalités non
+          disponibles en mode cinéma"). Réservé au canal câblé (le coach
+          anime la salle physique) — pas de raccourci sur le tableau réseau.
+          Le raccourci "lancer un fond" a été retiré (non fonctionnel). */}
+      {!channelCinema && isCable && (
         <div className="live-block">
           <h3>{t("dashboard.shortcutsTitle")}</h3>
           <div className="launch-row" style={{ flexWrap: "wrap" }}>
-            <select className="filter-select" style={{ flex: 1, minWidth: "180px" }} value={selectedBackgroundId} onChange={(e) => setSelectedBackgroundId(e.target.value)}>
-              <option value="">{t("dashboard.chooseBackground")}</option>
-              {backgrounds.map((bg) => (
-                <option key={bg.id} value={bg.id}>{bg.title}</option>
-              ))}
-            </select>
-            <button
-              className="btn btn-secondary"
-              disabled={!selectedBackgroundId}
-              onClick={() => selectedBackgroundId && sendCommand("load_background", { background_id: Number(selectedBackgroundId) })}
-            >
-              <Icon name="gradient" size={16} />
-              {t("dashboard.launchBackground")}
-            </button>
-            {/* Mode coach : réservé au canal câblé (le coach anime la salle
-                physique) — le raccourci n'apparaît pas sur le tableau réseau. */}
-            {isCable && (
-              // Link plutôt qu'un <a> classique (réf. correctif "quitte le
-              // plein écran sur téléphone") : un <a href> natif recharge
-              // toute la page et coupe la Fullscreen API du navigateur.
-              <Link href="/coach/" className="btn btn-primary" style={{ textDecoration: "none", display: "flex", alignItems: "center" }}>
-                <Icon name="mic" size={16} />
-                {t("dashboard.switchToCoach")}
-              </Link>
-            )}
+            {/* Link plutôt qu'un <a> classique (réf. correctif "quitte le
+                plein écran sur téléphone") : un <a href> natif recharge
+                toute la page et coupe la Fullscreen API du navigateur. */}
+            <Link href="/coach/" className="btn btn-primary" style={{ textDecoration: "none", display: "flex", alignItems: "center" }}>
+              <Icon name="mic" size={16} />
+              {t("dashboard.switchToCoach")}
+            </Link>
           </div>
         </div>
       )}
