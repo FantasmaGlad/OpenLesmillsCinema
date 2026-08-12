@@ -33,22 +33,92 @@ function formatClock(date: Date) {
   return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
 }
 
+/** Fondu de volume simple (réf. lot L6, D12 « fondu immédiat ») : anime
+ * `el.volume` de `from` à `to` sur `durationMs`. Volontairement un ramp
+ * <audio>.volume plutôt qu'un graphe Web Audio API (GainNode) — le vrai
+ * crossfade/gapless (lot L5) sera la brique qui le remplacera. */
+function rampVolume(el: HTMLAudioElement, from: number, to: number, durationMs: number) {
+  const start = Math.max(0, Math.min(1, from));
+  const end = Math.max(0, Math.min(1, to));
+  el.volume = start;
+  if (durationMs <= 0) {
+    el.volume = end;
+    return;
+  }
+  const startedAt = performance.now();
+  const step = (now: number) => {
+    const t = Math.min(1, (now - startedAt) / durationMs);
+    el.volume = start + (end - start) * t;
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 const REPEAT_CYCLE: RadioRepeatMode[] = ["off", "playlist", "track"];
 
 export default function RadioScreenPage() {
   const { t } = useAppSettings();
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const announcementAudioRef = useRef<HTMLAudioElement | null>(null);
   const [unlocked, setUnlocked] = useState(false);
   const [lastCause, setLastCause] = useState("sync");
   const lastReportRef = useRef(0);
   const isPrimaryRef = useRef(false);
+  // Rappel actuellement chargé côté client (id + mode), pour détecter les
+  // transitions démarrage/fin sans dépendre de l'ordre des évènements reçus.
+  const activeAnnouncementRef = useRef<{ id: number; mode: string } | null>(null);
+  // Réglages du duck (réf. lot L6, §9) : chargés une fois, pas encore
+  // éditables à chaud depuis l'admin (cf. routers/settings.py).
+  const duckSettingsRef = useRef({ level: 15, fadeMs: 1500 });
+  useEffect(() => {
+    fetch(getApiUrl("/settings"), { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return;
+        duckSettingsRef.current = {
+          level: typeof data.radio_announcement_duck_level === "number" ? data.radio_announcement_duck_level : 15,
+          fadeMs: typeof data.radio_announcement_fade_ms === "number" ? data.radio_announcement_fade_ms : 1500,
+        };
+      })
+      .catch(() => {});
+  }, []);
 
   const handleEvent = (evt: RadioEvent) => {
     setLastCause(evt.cause);
     const audio = audioRef.current;
+    const announcementAudio = announcementAudioRef.current;
     if (!audio) return;
     const data = evt.data;
     const track = data.current_track;
+
+    // Rappel (réf. lot L6) : traité avant la synchro piste ci-dessous, pour
+    // pouvoir démarrer/couper le duck avant que le volume de la musique ne
+    // soit réappliqué plus bas.
+    const ann = data.current_announcement;
+    const wasAnnouncing = activeAnnouncementRef.current;
+    if (announcementAudio && ann && ann.id !== wasAnnouncing?.id) {
+      activeAnnouncementRef.current = { id: ann.id, mode: ann.mode };
+      const annSrc = getApiUrl(`/radio/announcements/${ann.id}/stream`);
+      announcementAudio.src = annSrc;
+      announcementAudio.volume = 1;
+      announcementAudio.load();
+      if (unlocked) announcementAudio.play().catch(() => {});
+      if (ann.mode === "duck" && audio) {
+        rampVolume(audio, audio.volume, duckSettingsRef.current.level / 100, duckSettingsRef.current.fadeMs);
+      }
+    } else if (announcementAudio && !ann && wasAnnouncing) {
+      activeAnnouncementRef.current = null;
+      announcementAudio.pause();
+      announcementAudio.removeAttribute("src");
+      announcementAudio.load();
+      if (wasAnnouncing.mode === "duck" && audio) {
+        rampVolume(audio, audio.volume, data.volume / 100, duckSettingsRef.current.fadeMs);
+      }
+    }
+    // Volume de la musique : pas réappliqué pendant un duck en cours (le
+    // ramp ci-dessus le pilote), sinon un tick de position écraserait le
+    // fondu en cours à chaque rapport de position (~1/s).
+    const isDucking = activeAnnouncementRef.current?.mode === "duck";
 
     if (!track) {
       if (audio.getAttribute("src")) {
@@ -61,7 +131,7 @@ export default function RadioScreenPage() {
 
     const src = getApiUrl(`/radio/tracks/${track.id}/stream`);
     const srcChanged = !audio.src || !audio.src.endsWith(src);
-    audio.volume = data.volume / 100;
+    if (!isDucking) audio.volume = data.volume / 100;
 
     if (srcChanged) {
       audio.src = src;
@@ -98,7 +168,11 @@ export default function RadioScreenPage() {
       }
     }
 
-    if (data.playing && audio.paused) {
+    if (ann?.mode === "wait_end") {
+      // La piste vient de se terminer et laisse place au rappel (D12) : ne
+      // pas la relancer malgré `data.playing` resté à sa valeur d'avant
+      // (le serveur ne le modifie pas pendant un rappel).
+    } else if (data.playing && audio.paused) {
       if (unlocked) audio.play().catch(() => {});
     } else if (!data.playing && !audio.paused) {
       audio.pause();
@@ -147,7 +221,13 @@ export default function RadioScreenPage() {
     if (audio && state.playing && state.current_track) {
       audio.play().catch(() => {});
     }
+    const announcementAudio = announcementAudioRef.current;
+    if (announcementAudio && state.current_announcement) {
+      announcementAudio.play().catch(() => {});
+    }
   };
+
+  const handlePlayAnnouncement = () => sendCommand("radio_play_announcement", {});
 
   const currentTrack = state.current_track;
   const coverSrc = currentTrack?.cover_url ? getApiUrl(currentTrack.cover_url) : null;
@@ -165,6 +245,14 @@ export default function RadioScreenPage() {
   return (
     <div className="radio-screen">
       <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} onEnded={() => sendCommand("radio_track_ended")} />
+      <audio ref={announcementAudioRef} onEnded={() => sendCommand("announcement_ended")} />
+
+      {state.current_announcement && (
+        <div className="radio-announcement-banner">
+          <Icon name="campaign" size={18} />
+          {state.current_announcement.description}
+        </div>
+      )}
 
       {!unlocked && (
         <div className="radio-unlock-overlay">
@@ -240,6 +328,14 @@ export default function RadioScreenPage() {
               title={repeatLabel}
             >
               <Icon name={state.repeat === "track" ? "repeat_one" : "repeat"} size={20} />
+            </button>
+            <button
+              className="radio-transport-btn"
+              onClick={handlePlayAnnouncement}
+              disabled={!!state.current_announcement}
+              title={t("radioAnnouncements.playNow")}
+            >
+              <Icon name="campaign" size={20} />
             </button>
           </div>
 

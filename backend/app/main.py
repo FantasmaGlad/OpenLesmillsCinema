@@ -14,10 +14,13 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import init_db, get_db
-from app.models import AudioTrack, Background, RadioTrack, Video
+from app.models import AudioTrack, Background, RadioAnnouncement, RadioTrack, Video
 from app.playback_manager import get_all_playback_managers
 from app.radio_manager import get_radio_manager
-from app.routers import videos, playback, schedule, playlists, backgrounds, audio, audio_playlists, radio, radio_playlists, settings as settings_router, logs, import_jobs
+from app.routers import (
+    videos, playback, schedule, playlists, backgrounds, audio, audio_playlists,
+    radio, radio_playlists, radio_announcements, settings as settings_router, logs, import_jobs,
+)
 from app.utils.radio_utils import content_type_for
 from app.scheduler_manager import (
     start_scheduler,
@@ -26,6 +29,10 @@ from app.scheduler_manager import (
     stop_schedule_sync_listener,
 )
 from app.utils.importer import reconcile_orphaned_media
+from app.utils.radio_announcement_scheduler import (
+    start_radio_announcement_scheduler,
+    stop_radio_announcement_scheduler,
+)
 from app.utils.redis_client import close_redis
 from app.utils.watcher import start_watcher, stop_watcher
 from app.utils.ws_manager import manager as ws_manager
@@ -85,6 +92,10 @@ async def lifespan(app: FastAPI):
     for playback_manager in get_all_playback_managers().values():
         playback_manager.start_position_broadcast_loop()
     get_radio_manager().start_position_broadcast_loop()
+    # Règles temporelles des rappels (réf. lot L6, D11) : toutes les X
+    # minutes / à heures fixes — la règle « toutes les N musiques » n'a rien
+    # de temporel, elle est vérifiée à chaque fin de piste (routers/playback.py).
+    start_radio_announcement_scheduler()
     yield
     # Shutdown : Arrêt propre du scheduler, du watcher et de Redis
     stop_scheduler()
@@ -92,6 +103,7 @@ async def lifespan(app: FastAPI):
     for playback_manager in get_all_playback_managers().values():
         playback_manager.stop_position_broadcast_loop()
     get_radio_manager().stop_position_broadcast_loop()
+    await stop_radio_announcement_scheduler()
     await ws_manager.stop_redis_listener()
     await stop_schedule_sync_listener()
     await close_redis()
@@ -119,6 +131,7 @@ app.include_router(audio.router)
 app.include_router(audio_playlists.router)
 app.include_router(radio.router)
 app.include_router(radio_playlists.router)
+app.include_router(radio_announcements.router)
 app.include_router(settings_router.router)
 app.include_router(logs.router)
 app.include_router(import_jobs.router)
@@ -273,6 +286,19 @@ async def stream_radio_cover(
     if not track or not track.cover_path:
         raise HTTPException(status_code=404, detail="Pochette non trouvée")
     return await _range_stream_response(Path(track.cover_path), range, "image/jpeg")
+
+
+@app.get("/api/radio/announcements/{announcement_id}/stream")
+async def stream_radio_announcement(
+    announcement_id: int,
+    range: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Flux audio d'un rappel (réf. lot L6)."""
+    announcement = db.query(RadioAnnouncement).filter(RadioAnnouncement.id == announcement_id).first()
+    if not announcement:
+        raise HTTPException(status_code=404, detail="Rappel non trouvé")
+    return await _range_stream_response(Path(announcement.file_path), range, content_type_for(announcement.file_path))
 
 
 # Montage des dossiers statiques requis

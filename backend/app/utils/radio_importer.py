@@ -15,7 +15,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import ImportSource, RadioCoverSource, RadioTrack
+from app.models import ImportSource, RadioAnnouncement, RadioCoverSource, RadioTrack
 from app.utils.activity_log import log_activity
 from app.utils.import_jobs import update_job
 from app.utils.radio_utils import (
@@ -138,3 +138,33 @@ def import_radio_tracks_from_zip(zip_path: str, job_id: str | None = None) -> li
 def import_radio_track_from_watched_file(file_path: str, job_id: str | None = None) -> list[RadioTrack]:
     """Import d'un fichier unique déposé dans le dossier surveillé radio."""
     return import_radio_tracks_from_files([file_path], source=ImportSource.watched_folder, job_id=job_id)
+
+
+def import_radio_announcement(file_path: str, description: str, db) -> RadioAnnouncement:
+    """Importe un rappel (réf. lot L6, D11-D13) : fichier unique + description
+    OBLIGATOIRE, saisie en même temps que l'upload — pas de traitement en
+    arrière-plan (pas de dossier surveillé pour les rappels, cf. §10.2 :
+    une description manuelle est de toute façon requise). Effectue le commit."""
+    src = Path(file_path)
+    if src.suffix.lower() not in AUDIO_EXTENSIONS:
+        raise ValueError(f"Format audio non pris en charge : {src.suffix}")
+
+    file_id = uuid.uuid4().hex
+    meta = extract_radio_metadata(str(src))
+
+    Path(settings.radio_announcements_dir).mkdir(parents=True, exist_ok=True)
+    if needs_transcode(str(src)):
+        dest_path = Path(settings.radio_announcements_dir) / f"announcement_{file_id}.m4a"
+        transcode_to_web(str(src), str(dest_path))
+    else:
+        dest_path = Path(settings.radio_announcements_dir) / f"announcement_{file_id}{src.suffix.lower()}"
+        shutil.copy(str(src), dest_path)
+
+    announcement = RadioAnnouncement(
+        file_path=str(dest_path), description=description, duration_seconds=meta["duration_seconds"],
+    )
+    db.add(announcement)
+    db.commit()
+    db.refresh(announcement)
+    log_activity(db, "radio_announcement_imported", description)
+    return announcement

@@ -39,8 +39,14 @@ class RadioPlaybackManager:
         self._worker_id = str(os.getpid())
         self._last_direct_report = 0.0
         self._position_broadcast_task: asyncio.Task | None = None
+        # Avance différée (réf. lot L6, D12 « toutes les N musiques ») : la fin
+        # de piste qui a déclenché le rappel n'avance PAS tout de suite — cet
+        # indicateur interne (pas de self.state : pur détail d'orchestration,
+        # jamais utile au client) fait patienter l'avancement jusqu'à la fin du
+        # rappel (`announcement_ended`).
+        self._deferred_advance_pending = False
         self.state: dict[str, Any] = {
-            "state": "idle",            # idle | playing | paused
+            "state": "idle",            # idle | playing | paused | announcing
             "playlist_id": None,
             "playlist_name": None,
             "order": [],                # ordre de lecture courant (liste de pistes)
@@ -54,6 +60,14 @@ class RadioPlaybackManager:
             "playing": False,
             # Réglages transmis au lecteur /radio (lots L4/L5).
             "crossfade_seconds": settings.radio_crossfade_seconds,
+            # Rappels (réf. lot L6) : {id, description, mode} | None. `mode` =
+            # "wait_end" (D12 « toutes les N musiques », inséré entre 2 pistes,
+            # musique déjà arrêtée) ou "duck" (X min/heures fixes/manuel, fondu
+            # immédiat pendant que la musique continue).
+            "current_announcement": None,
+            # Compteur de la règle « toutes les N musiques » (réf. D11),
+            # remis à zéro à chaque rappel joué, quel que soit son mode.
+            "tracks_since_announcement": 0,
         }
 
     # ------------------------------------------------------------------
@@ -188,6 +202,10 @@ class RadioPlaybackManager:
         self.state["position_seconds"] = 0.0
         self.state["playing"] = bool(order)
         self.state["state"] = "playing" if order else "idle"
+        # Un rappel en cours (mode wait_end en particulier) n'a plus de sens
+        # une fois la playlist remplacée (réf. lot L6).
+        self.state["current_announcement"] = None
+        self._deferred_advance_pending = False
         self._sync_current()
         await self._emit("radio_load_playlist", client_ts)
 
@@ -210,7 +228,9 @@ class RadioPlaybackManager:
             "state": "idle", "playlist_id": None, "playlist_name": None,
             "order": [], "index": None, "current_track": None,
             "duration_seconds": None, "position_seconds": 0.0, "playing": False,
+            "current_announcement": None,
         })
+        self._deferred_advance_pending = False
         await self._emit("radio_stop", client_ts)
 
     async def next_track(self, client_ts: float | None = None):
@@ -257,14 +277,10 @@ class RadioPlaybackManager:
         self._sync_current()
         await self._emit("radio_jump_to_track", client_ts)
 
-    async def track_ended(self, client_ts: float | None = None):
-        """Fin de piste rapportée par le lecteur /radio : enchaînement auto."""
-        if not self.state["order"]:
-            return
-        if self.state["repeat"] == "track":
-            self.state["position_seconds"] = 0.0
-            await self._emit("radio_restart_track", client_ts)
-            return
+    async def _advance_or_stop(self, client_ts: float | None = None):
+        """Avance à la piste suivante ou s'arrête en fin de playlist (partagé
+        entre la fin de piste normale et la reprise après un rappel « toutes
+        les N musiques », réf. lot L6)."""
         if self._advance_index():
             self.state["position_seconds"] = 0.0
             self.state["playing"] = True
@@ -277,6 +293,48 @@ class RadioPlaybackManager:
             self.state["state"] = "paused"
             self.state["position_seconds"] = 0.0
             await self._emit("radio_ended", client_ts)
+
+    async def track_ended(self, client_ts: float | None = None):
+        """Fin de piste rapportée par le lecteur /radio : enchaînement auto."""
+        if not self.state["order"]:
+            return
+        if self.state["repeat"] == "track":
+            self.state["position_seconds"] = 0.0
+            await self._emit("radio_restart_track", client_ts)
+            return
+        await self._advance_or_stop(client_ts)
+
+    # ------------------------------------------------------------------
+    # Rappels (réf. lot L6, D11-D13)
+    # ------------------------------------------------------------------
+    async def play_announcement(
+        self, announcement: dict, mode: str, client_ts: float | None = None, deferred_advance: bool = False,
+    ):
+        """Déclenche un rappel. `mode` = "wait_end" (D12 : la piste vient de se
+        terminer, `deferred_advance=True` fait patienter l'avancement jusqu'à
+        `announcement_ended`) ou "duck" (X min/heures fixes/manuel : la
+        musique continue, le fondu est géré côté lecteur /radio). Le compteur
+        « toutes les N musiques » est remis à zéro par TOUT rappel joué (D11),
+        pas seulement ceux déclenchés par cette règle."""
+        self.state["current_announcement"] = {
+            "id": announcement["id"], "description": announcement["description"], "mode": mode,
+        }
+        self.state["tracks_since_announcement"] = 0
+        self._deferred_advance_pending = deferred_advance
+        self.state["state"] = "announcing"
+        await self._emit("radio_play_announcement", client_ts)
+
+    async def announcement_ended(self, client_ts: float | None = None):
+        """Fin de rappel rapportée par le lecteur /radio. En mode « wait_end »,
+        l'avancement à la piste suivante — différé depuis la fin de piste
+        précédente — a enfin lieu ici."""
+        self.state["current_announcement"] = None
+        if self._deferred_advance_pending:
+            self._deferred_advance_pending = False
+            await self._advance_or_stop(client_ts)
+        else:
+            self.state["state"] = "playing" if self.state["playing"] else "paused"
+            await self._emit("radio_announcement_ended", client_ts)
 
     async def seek(self, position_seconds: float, client_ts: float | None = None):
         self.state["position_seconds"] = max(0.0, position_seconds)

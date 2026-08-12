@@ -78,6 +78,12 @@ def get_settings(db: Session = Depends(get_db)) -> dict[str, Any]:
         "audio_chain_timer_seconds": runtime_settings.audio_chain_timer_seconds,
         "theme": theme,
         "language": language,
+        # Réglages du duck des rappels radio (réf. lot L6) : consommés par
+        # /radio pour le fondu musique pendant une annonce — pas encore
+        # éditables à chaud depuis cette API (valeurs de config.toml
+        # uniquement pour l'instant, cf. _WRITABLE_NUMERIC_FIELDS).
+        "radio_announcement_duck_level": runtime_settings.radio_announcement_duck_level,
+        "radio_announcement_fade_ms": runtime_settings.radio_announcement_fade_ms,
         # Chemins en lecture seule (réf. UX3.17 "chemins d'information")
         "paths": {
             "database_url": runtime_settings.database_url,

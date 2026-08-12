@@ -5,8 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from sqlalchemy import func
+
 from app.database import get_db
-from app.models import AudioCourse, AudioPlaylist, Background, PlaybackState, RadioPlaylist, RadioTrack, Video, Playlist
+from app.models import (
+    AudioCourse, AudioPlaylist, Background, PlaybackState,
+    RadioAnnouncement, RadioAnnouncementRule, RadioAnnouncementRuleType,
+    RadioPlaylist, RadioTrack, Video, Playlist,
+)
 from app.playback_manager import CHANNELS, DEFAULT_CHANNEL, get_playback_manager, init_playback_managers
 from app.radio_manager import init_radio_manager, get_radio_manager
 from app.routers.settings import get_display_output_value
@@ -662,7 +668,33 @@ async def _handle_radio_command(
     elif command == "radio_remove_from_queue":
         await manager.remove_from_order(int(params.get("index", -1)), client_ts)
     elif command == "radio_track_ended":
-        await manager.track_ended(client_ts)
+        # Règle « toutes les N musiques » (réf. lot L6, D11-D12) : vérifiée
+        # ICI (accès DB), pas dans le manager (état pur) — même partage des
+        # responsabilités que scheduler_manager/playback_manager. Si due, le
+        # rappel se joue AVANT l'avancement (attente-fin), qui reprendra à sa
+        # fin (`announcement_ended`, deferred_advance=True) plutôt que tout
+        # de suite.
+        manager.state["tracks_since_announcement"] = manager.state.get("tracks_since_announcement", 0) + 1
+        due = _due_wait_end_announcement(db, manager)
+        if due:
+            await manager.play_announcement(
+                {"id": due.id, "description": due.description}, mode="wait_end",
+                client_ts=client_ts, deferred_advance=True,
+            )
+        else:
+            await manager.track_ended(client_ts)
+    elif command == "radio_play_announcement":
+        # Déclenchement manuel depuis /radio (bouton rappel) — toujours en
+        # mode « duck » (D12), null = tirage aléatoire (D13).
+        announcement = _resolve_announcement(db, params.get("announcement_id"))
+        if not announcement:
+            logger.warning("Commande radio_play_announcement : aucun rappel disponible")
+            return
+        await manager.play_announcement(
+            {"id": announcement.id, "description": announcement.description}, mode="duck", client_ts=client_ts,
+        )
+    elif command == "announcement_ended":
+        await manager.announcement_ended(client_ts)
     elif command == "report_position":
         # Même règle que report_position câblé/réseau (lot L4) : seul le
         # poste /radio primaire (identify role=kiosk channel=radio) a
@@ -674,3 +706,30 @@ async def _handle_radio_command(
         await manager.report_position(float(params.get("position_seconds", 0)))
     else:
         logger.warning(f"Commande radio WebSocket inconnue reçue : {command}")
+
+
+def _resolve_announcement(db: Session, announcement_id) -> RadioAnnouncement | None:
+    """Rappel ciblé, ou tirage aléatoire parmi les actifs si absent (D13)."""
+    query = db.query(RadioAnnouncement).filter(RadioAnnouncement.enabled == True)  # noqa: E712
+    if announcement_id:
+        return query.filter(RadioAnnouncement.id == announcement_id).first()
+    return query.order_by(func.random()).first()
+
+
+def _due_wait_end_announcement(db: Session, manager) -> RadioAnnouncement | None:
+    """Règle « toutes les N musiques » due (réf. D11) : compare le compteur
+    (déjà incrémenté par l'appelant) au seuil de la règle enregistrée la plus
+    stricte. Renvoie un rappel tiré au hasard (D13) si une règle active est
+    satisfaite, sinon None."""
+    count = manager.state.get("tracks_since_announcement", 0)
+    rules = (
+        db.query(RadioAnnouncementRule)
+        .filter(
+            RadioAnnouncementRule.enabled == True,  # noqa: E712
+            RadioAnnouncementRule.rule_type == RadioAnnouncementRuleType.every_n_tracks,
+        )
+        .all()
+    )
+    if not any(count >= (rule.n_tracks or 1) for rule in rules):
+        return None
+    return _resolve_announcement(db, None)

@@ -17,6 +17,7 @@ export const navLinks: NavLinkConfig[] = [
   { href: "/audio-playlists", labelKey: "nav.audioPlaylists", iconName: "queue_music" },
   { href: "/radio-remote", labelKey: "nav.radioRemote", iconName: "graphic_eq" },
   { href: "/radio-library", labelKey: "nav.radioLibrary", iconName: "radio" },
+  { href: "/radio-announcements", labelKey: "nav.radioAnnouncements", iconName: "campaign" },
   { href: "/schedule", labelKey: "nav.schedule", iconName: "calendar_month" },
 ];
 

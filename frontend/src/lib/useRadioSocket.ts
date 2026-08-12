@@ -19,8 +19,17 @@ export interface RadioTrackInfo {
 
 export type RadioRepeatMode = "off" | "playlist" | "track";
 
+/** Rappel en cours (réf. lot L6, D12) : "wait_end" = inséré entre 2 pistes
+ * (musique déjà arrêtée), "duck" = fondu immédiat pendant que la musique
+ * continue (X min / heures fixes / manuel). */
+export interface RadioAnnouncementInfo {
+  id: number;
+  description: string;
+  mode: "wait_end" | "duck";
+}
+
 export interface RadioState {
-  state: "idle" | "playing" | "paused";
+  state: "idle" | "playing" | "paused" | "announcing";
   playlist_id: number | null;
   playlist_name: string | null;
   order: RadioTrackInfo[];
@@ -33,6 +42,8 @@ export interface RadioState {
   repeat: RadioRepeatMode;
   playing: boolean;
   crossfade_seconds: number;
+  current_announcement: RadioAnnouncementInfo | null;
+  tracks_since_announcement: number;
 }
 
 const DEFAULT_STATE: RadioState = {
@@ -49,6 +60,8 @@ const DEFAULT_STATE: RadioState = {
   repeat: "off",
   playing: false,
   crossfade_seconds: 4,
+  current_announcement: null,
+  tracks_since_announcement: 0,
 };
 
 export interface RadioEvent {

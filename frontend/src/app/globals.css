@@ -4320,6 +4320,23 @@ h1, h2, h3, h4, h5, h6 {
   text-align: center;
 }
 
+.radio-announcement-banner {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  background: var(--accent-primary);
+  color: var(--accent-primary-fg);
+  border-radius: var(--radius-lg);
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
 .radio-unlock-btn {
   padding: 18px 40px;
   font-size: 1.2rem;
