@@ -152,6 +152,13 @@ export const dictionaries: Record<Language, Dict> = {
       noSearchResults: "Aucun morceau ne correspond à la recherche.",
       fetchError: "Impossible de charger les playlists radio.",
     },
+    radioScreen: {
+      idleLabel: "Radio",
+      idleHint: "En attente d'une playlist",
+      unlockTitle: "Radio",
+      unlockHint: "Cliquez pour démarrer la diffusion sur ce poste.",
+      unlockButton: "Démarrer la radio",
+    },
     header: {
       libraryTitle: "Bibliothèque Vidéo",
       audioTitle: "Cours Audio",
@@ -910,6 +917,13 @@ export const dictionaries: Record<Language, Dict> = {
       add: "Add",
       noSearchResults: "No track matches your search.",
       fetchError: "Could not load radio playlists.",
+    },
+    radioScreen: {
+      idleLabel: "Radio",
+      idleHint: "Waiting for a playlist",
+      unlockTitle: "Radio",
+      unlockHint: "Click to start playback on this device.",
+      unlockButton: "Start the radio",
     },
     header: {
       libraryTitle: "Video Library",

@@ -44,7 +44,11 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
   const isFullscreenRoute =
     pathname === "/kiosk" || pathname === "/kiosk/" ||
     pathname === "/cinema" || pathname === "/cinema/" ||
-    pathname === "/coach" || pathname === "/coach/";
+    pathname === "/coach" || pathname === "/coach/" ||
+    // Poste radio dédié (réf. lot L4) : écran plein écran comme /kiosk, PAS
+    // de préfixe (pathname.startsWith) pour ne pas avaler /radio-library et
+    // /radio-remote, qui restent des pages d'admin normales.
+    pathname === "/radio" || pathname === "/radio/";
   useClickSound(!isFullscreenRoute);
 
   const SCREEN_STATE_LABELS: Record<string, string> = {

@@ -78,9 +78,19 @@ function getApiUrl(path: string): string {
 // intervalle régulier, au cas où un broadcast() aurait été perdu.
 const RESYNC_INTERVAL_MS = 15000;
 
-export function useRadioSocket(onEvent?: (evt: RadioEvent) => void) {
+/**
+ * @param onEvent  Callback appelé à chaque changement d'état reçu.
+ * @param role     "kiosk" pour le poste /radio (lot L4) : envoie un identify
+ *                 à la connexion et reçoit son statut primaire/miroir en
+ *                 retour (réf. correctif P4, même mécanisme que le kiosk
+ *                 câblé/réseau) — seul le primaire a autorité pour rapporter
+ *                 la position réelle de lecture. Omis pour une télécommande
+ *                 (radio-remote), qui ne fait que refléter/commander l'état.
+ */
+export function useRadioSocket(onEvent?: (evt: RadioEvent) => void, role?: "kiosk") {
   const [state, setState] = useState<RadioState>(DEFAULT_STATE);
   const [connected, setConnected] = useState(false);
+  const [isPrimary, setIsPrimary] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const pendingCommandsRef = useRef<{ payload: string; queuedAt: number }[]>([]);
   const onEventRef = useRef(onEvent);
@@ -109,6 +119,12 @@ export function useRadioSocket(onEvent?: (evt: RadioEvent) => void) {
         if (wsRef.current !== ws) return;
         setConnected(true);
         retryDelay = 1000;
+        // Identification du rôle kiosk (réf. correctif P4) : envoyée dès
+        // l'ouverture pour que le backend assigne le rôle primaire/miroir
+        // avant tout report_position.
+        if (role === "kiosk") {
+          ws.send(JSON.stringify({ command: "identify", params: { role: "kiosk", channel: "radio" } }));
+        }
         const now = Date.now();
         const pending = pendingCommandsRef.current.filter((p) => now - p.queuedAt < 5000);
         pendingCommandsRef.current = [];
@@ -123,8 +139,16 @@ export function useRadioSocket(onEvent?: (evt: RadioEvent) => void) {
             ws.send(JSON.stringify({ command: "pong" }));
             return;
           }
-          // Évènements pertinents pour d'autres canaux (kiosk_role,
-          // display_output, cinema_*...) : sans objet ici, ignorés.
+          if (parsed.event === "kiosk_role") {
+            setIsPrimary(!!parsed.is_primary);
+            return;
+          }
+          if (parsed.event === "promoted_primary") {
+            setIsPrimary(true);
+            return;
+          }
+          // Évènements pertinents pour d'autres canaux (display_output,
+          // cinema_*...) : sans objet ici, ignorés.
           if (parsed.event === "force_reload") {
             window.location.reload();
             return;
@@ -141,6 +165,7 @@ export function useRadioSocket(onEvent?: (evt: RadioEvent) => void) {
       ws.onclose = () => {
         if (wsRef.current !== ws) return;
         setConnected(false);
+        setIsPrimary(false);
         wsRef.current = null;
         if (!cancelled) {
           reconnectTimer = setTimeout(connect, retryDelay);
@@ -160,7 +185,7 @@ export function useRadioSocket(onEvent?: (evt: RadioEvent) => void) {
       clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, []);
+  }, [role]);
 
   useEffect(() => {
     let cancelled = false;
@@ -196,5 +221,5 @@ export function useRadioSocket(onEvent?: (evt: RadioEvent) => void) {
     if (pendingCommandsRef.current.length > 10) pendingCommandsRef.current.shift();
   }, []);
 
-  return { state, connected, sendCommand };
+  return { state, connected, sendCommand, isPrimary };
 }

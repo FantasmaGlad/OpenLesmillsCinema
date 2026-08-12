@@ -1,0 +1,275 @@
+"use client";
+
+import React, { useEffect, useRef, useState } from "react";
+import { useAppSettings } from "@/lib/AppSettingsContext";
+import { useInterpolatedPosition } from "@/lib/useInterpolatedPosition";
+import { RadioEvent, RadioRepeatMode, useRadioSocket } from "@/lib/useRadioSocket";
+import Icon from "@/components/Icon";
+import AppLogo from "@/components/AppLogo";
+
+// Écran du poste radio dédié (réf. docs/cahier-des-charges-radio.md, lot L4) :
+// mise en page "type Spotify", lecteur PRIMAIRE (source de la position
+// rapportée au serveur, comme le kiosk câblé/réseau — réf. correctif P4).
+// Volontairement plus simple que /kiosk : un seul <audio>, pas de couches
+// vidéo/fond/intro à synchroniser. Ouvert à la main dans un navigateur
+// standard, PAS de service kiosk systemd dédié (arbitrage A5) — d'où l'écran
+// de déverrouillage ci-dessous (politique d'autoplay des navigateurs).
+
+function getApiUrl(path: string) {
+  if (typeof window !== "undefined" && window.location.port === "3000") {
+    return `http://localhost:8001/api${path}`;
+  }
+  return `/api${path}`;
+}
+
+function formatTime(seconds: number | null | undefined) {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return "--:--";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function formatClock(date: Date) {
+  return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+}
+
+const REPEAT_CYCLE: RadioRepeatMode[] = ["off", "playlist", "track"];
+
+export default function RadioScreenPage() {
+  const { t } = useAppSettings();
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [unlocked, setUnlocked] = useState(false);
+  const [lastCause, setLastCause] = useState("sync");
+  const lastReportRef = useRef(0);
+  const isPrimaryRef = useRef(false);
+
+  const handleEvent = (evt: RadioEvent) => {
+    setLastCause(evt.cause);
+    const audio = audioRef.current;
+    if (!audio) return;
+    const data = evt.data;
+    const track = data.current_track;
+
+    if (!track) {
+      if (audio.getAttribute("src")) {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+      }
+      return;
+    }
+
+    const src = getApiUrl(`/radio/tracks/${track.id}/stream`);
+    const srcChanged = !audio.src || !audio.src.endsWith(src);
+    audio.volume = data.volume / 100;
+
+    if (srcChanged) {
+      audio.src = src;
+      audio.load();
+      const onReady = () => {
+        audio.removeEventListener("canplay", onReady);
+        try {
+          audio.currentTime = data.position_seconds || 0;
+        } catch {
+          // Rattrapé au prochain évènement si toujours pas prêt.
+        }
+        if (data.playing && unlocked) audio.play().catch(() => {});
+      };
+      audio.addEventListener("canplay", onReady);
+      return;
+    }
+
+    // Même piste : ne recale le temps que sur une vraie discontinuité (seek/
+    // redémarrage), jamais sur un simple tick de position (réf. correctif
+    // "saccades kiosk réseau" — même principe pour la radio).
+    if (evt.cause === "radio_seek" || evt.cause === "radio_restart_track") {
+      try {
+        audio.currentTime = data.position_seconds;
+      } catch {
+        // ignore
+      }
+    } else if (!isPrimaryRef.current && Math.abs(audio.currentTime - data.position_seconds) > 1.5) {
+      // Dérive du lecteur MIROIR uniquement (réf. A3 : aucun miroir garanti
+      // en pratique, mais on reste cohérent si un second onglet est ouvert).
+      try {
+        audio.currentTime = data.position_seconds;
+      } catch {
+        // ignore
+      }
+    }
+
+    if (data.playing && audio.paused) {
+      if (unlocked) audio.play().catch(() => {});
+    } else if (!data.playing && !audio.paused) {
+      audio.pause();
+    }
+  };
+
+  const { state, connected, sendCommand, isPrimary } = useRadioSocket(handleEvent, "kiosk");
+  useEffect(() => {
+    isPrimaryRef.current = isPrimary;
+  }, [isPrimary]);
+
+  const livePosition = useInterpolatedPosition(state.position_seconds, state.playing, lastCause);
+
+  const [now, setNow] = useState(new Date());
+  const clockOffsetRef = useRef(0);
+  useEffect(() => {
+    const syncClock = () => {
+      fetch(getApiUrl("/time"), { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data && typeof data.server_ts === "number") clockOffsetRef.current = data.server_ts - Date.now();
+        })
+        .catch(() => {});
+    };
+    syncClock();
+    const syncId = setInterval(syncClock, 60 * 1000);
+    const tickId = setInterval(() => setNow(new Date(Date.now() + clockOffsetRef.current)), 1000);
+    return () => {
+      clearInterval(syncId);
+      clearInterval(tickId);
+    };
+  }, []);
+
+  const handleTimeUpdate = () => {
+    const audio = audioRef.current;
+    if (!audio || !isPrimary) return;
+    const now = Date.now();
+    if (now - lastReportRef.current < 900) return;
+    lastReportRef.current = now;
+    sendCommand("report_position", { position_seconds: audio.currentTime });
+  };
+
+  const handleUnlock = () => {
+    setUnlocked(true);
+    const audio = audioRef.current;
+    if (audio && state.playing && state.current_track) {
+      audio.play().catch(() => {});
+    }
+  };
+
+  const currentTrack = state.current_track;
+  const coverSrc = currentTrack?.cover_url ? getApiUrl(currentTrack.cover_url) : null;
+  const duration = state.duration_seconds ?? currentTrack?.duration_seconds ?? 0;
+  const queue = state.index !== null ? state.order.slice(state.index + 1) : [];
+
+  const handlePlayPause = () => sendCommand(state.playing ? "pause" : "play");
+  const handleRepeatCycle = () => {
+    const next = REPEAT_CYCLE[(REPEAT_CYCLE.indexOf(state.repeat) + 1) % REPEAT_CYCLE.length];
+    sendCommand("radio_set_repeat", { mode: next });
+  };
+  const repeatLabel =
+    state.repeat === "track" ? t("radioRemote.repeatTrack") : state.repeat === "playlist" ? t("radioRemote.repeatPlaylist") : t("radioRemote.repeatOff");
+
+  return (
+    <div className="radio-screen">
+      <audio ref={audioRef} onTimeUpdate={handleTimeUpdate} onEnded={() => sendCommand("radio_track_ended")} />
+
+      {!unlocked && (
+        <div className="radio-unlock-overlay">
+          <AppLogo size={72} />
+          <div>
+            <div style={{ fontSize: "1.4rem", fontWeight: 800, marginBottom: "8px" }}>{t("radioScreen.unlockTitle")}</div>
+            <div style={{ color: "var(--text-muted)" }}>{t("radioScreen.unlockHint")}</div>
+          </div>
+          <button className="radio-unlock-btn" onClick={handleUnlock}>
+            <Icon name="play_circle" size={22} filled />
+            {t("radioScreen.unlockButton")}
+          </button>
+        </div>
+      )}
+
+      {!currentTrack ? (
+        <>
+          <AppLogo size={90} />
+          <span className="radio-screen-clock">{formatClock(now)}</span>
+          <span className="radio-screen-idle-label">
+            {connected ? t("radioScreen.idleHint") : t("radioRemote.disconnected")}
+          </span>
+        </>
+      ) : (
+        <>
+          <div className="radio-cover">
+            {coverSrc ? <img src={coverSrc} alt="" /> : <Icon name="music_note" size={64} />}
+          </div>
+
+          <div>
+            <div className="radio-meta-title">{currentTrack.title}</div>
+            <div className="radio-meta-artist">
+              {currentTrack.artist || t("radioLibrary.unknownArtist")}
+              {currentTrack.album ? ` — ${currentTrack.album}` : ""}
+            </div>
+          </div>
+
+          <div className="radio-screen-progress">
+            <span>{formatTime(livePosition)}</span>
+            <input
+              type="range"
+              min={0}
+              max={duration || 0}
+              step={1}
+              value={livePosition}
+              onChange={(e) => sendCommand("radio_seek", { position_seconds: Number(e.target.value) })}
+              className="seek-slider"
+              style={{ flex: 1 }}
+            />
+            <span>{formatTime(duration)}</span>
+          </div>
+
+          <div className="radio-screen-controls">
+            <button
+              className={`radio-transport-btn ${state.shuffle ? "active" : ""}`}
+              onClick={() => sendCommand("radio_set_shuffle", { on: !state.shuffle })}
+              title={t("radioRemote.shuffleLabel")}
+            >
+              <Icon name="shuffle" size={20} />
+            </button>
+            <button className="radio-transport-btn" onClick={() => sendCommand("radio_previous_track")} title={t("radioRemote.previousTrack")}>
+              <Icon name="skip_previous" size={22} filled />
+            </button>
+            <button className="radio-transport-btn main" onClick={handlePlayPause}>
+              <Icon name={state.playing ? "pause" : "play_arrow"} size={30} filled />
+            </button>
+            <button className="radio-transport-btn" onClick={() => sendCommand("radio_next_track")} title={t("radioRemote.nextTrack")}>
+              <Icon name="skip_next" size={22} filled />
+            </button>
+            <button
+              className={`radio-transport-btn ${state.repeat !== "off" ? "active" : ""}`}
+              onClick={handleRepeatCycle}
+              title={repeatLabel}
+            >
+              <Icon name={state.repeat === "track" ? "repeat_one" : "repeat"} size={20} />
+            </button>
+          </div>
+
+          <div className="radio-screen-volume">
+            <Icon name="volume_up" size={18} />
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={state.volume}
+              onChange={(e) => sendCommand("volume", { volume: Number(e.target.value) })}
+              className="volume-slider"
+              style={{ flex: 1 }}
+            />
+            <span>{state.volume}%</span>
+          </div>
+
+          {queue.length > 0 && (
+            <div className="radio-screen-queue">
+              {queue.map((track, i) => (
+                <div key={`${track.id}-${i}`} className="radio-screen-queue-item">
+                  <span>{track.title}</span>
+                  <span>{track.artist || t("radioLibrary.unknownArtist")}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

@@ -253,15 +253,19 @@ async def playback_ws(websocket: WebSocket, db: Session = Depends(get_db)):
             message = await websocket.receive_json()
             # Identification du rôle du client (réf. correctif P4).
             # Le kiosk envoie {"command": "identify", "params": {"role":
-            # "kiosk", "channel": "cable"|"network"}} dès l'ouverture de la
-            # connexion. On enregistre son rôle SUR SON CANAL et on lui
+            # "kiosk", "channel": "cable"|"network"|"radio"}} dès l'ouverture
+            # de la connexion. On enregistre son rôle SUR SON CANAL et on lui
             # retourne son statut primaire/miroir via un message dédié.
             if message.get("command") == "identify":
                 params = message.get("params") or {}
                 role = params.get("role")
                 if role == "kiosk" and not is_kiosk:
                     is_kiosk = True
-                    kiosk_channel = _resolve_channel(params.get("channel"))
+                    requested_channel = params.get("channel")
+                    # Le poste /radio (lot L4) est le lecteur primaire du 3e
+                    # canal, hors CHANNELS (cable/network) : _resolve_channel
+                    # le ferait retomber sur "cable" à tort.
+                    kiosk_channel = "radio" if requested_channel == "radio" else _resolve_channel(requested_channel)
                     is_primary = ws_manager.register_kiosk(websocket, kiosk_channel)
                     await websocket.send_json({
                         "event": "kiosk_role",
@@ -344,7 +348,7 @@ async def _handle_command(
         # 3e canal, moteur INDÉPENDANT (réf. lot L3) : vocabulaire de
         # commandes propre (radio_*), géré séparément plutôt que dans la
         # chaîne câblé/réseau ci-dessous.
-        await _handle_radio_command(command, params, client_ts, db)
+        await _handle_radio_command(command, params, client_ts, db, websocket, is_kiosk)
         return
 
     channel = _resolve_channel(raw_channel)
@@ -607,11 +611,14 @@ def _radio_track_dict(track: RadioTrack) -> dict:
     }
 
 
-async def _handle_radio_command(command: str, params: dict, client_ts, db: Session) -> None:
+async def _handle_radio_command(
+    command: str, params: dict, client_ts, db: Session,
+    websocket: WebSocket | None = None, is_kiosk: bool = False,
+) -> None:
     """Commandes du canal radio (réf. docs/cahier-des-charges-radio.md §5.5,
-    lot L3) : vocabulaire propre (radio_*), séparé de la chaîne câblé/réseau
-    ci-dessus car le RadioPlaybackManager n'a pas la même sémantique d'état
-    (playlist de morceaux plutôt que vidéo/cours)."""
+    lots L3/L4) : vocabulaire propre (radio_*), séparé de la chaîne câblé/
+    réseau ci-dessus car le RadioPlaybackManager n'a pas la même sémantique
+    d'état (playlist de morceaux plutôt que vidéo/cours)."""
     manager = get_radio_manager()
 
     if command == "load_radio_playlist":
@@ -657,10 +664,13 @@ async def _handle_radio_command(command: str, params: dict, client_ts, db: Sessi
     elif command == "radio_track_ended":
         await manager.track_ended(client_ts)
     elif command == "report_position":
-        # Même règle que report_position câblé/réseau : seul le lecteur
-        # primaire (le poste /radio, lot L4) devrait rapporter — pas de
-        # kiosk radio enregistré en L3, donc aucune vérification primaire
-        # ici pour l'instant (rien n'envoie encore cette commande).
+        # Même règle que report_position câblé/réseau (lot L4) : seul le
+        # poste /radio primaire (identify role=kiosk channel=radio) a
+        # autorité sur la position — un éventuel second onglet /radio ouvert
+        # par erreur reste miroir et ne doit pas contredire le rapport du
+        # premier.
+        if is_kiosk and websocket is not None and not ws_manager.is_primary_kiosk(websocket):
+            return
         await manager.report_position(float(params.get("position_seconds", 0)))
     else:
         logger.warning(f"Commande radio WebSocket inconnue reçue : {command}")

@@ -4172,3 +4172,161 @@ h1, h2, h3, h4, h5, h6 {
   gap: 8px;
   padding: 10px 16px 0;
 }
+
+/* ===== Écran radio dédié (/radio, lot L4) — mise en page "type Spotify" du
+   poste dédié, pensée écran tactile/souris. Volontairement plus simple que
+   .kiosk-* (pas de multi-couches vidéo/fond/intro à gérer, un seul <audio>). */
+.radio-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  background: var(--bg-main);
+  color: var(--text-main);
+  padding: 5vh 5vw;
+  overflow: hidden;
+  text-align: center;
+}
+
+.radio-screen-clock {
+  font-size: 6rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.radio-screen-idle-label {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-top: -12px;
+}
+
+.radio-cover {
+  width: min(38vh, 38vw);
+  height: min(38vh, 38vw);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-surface-elevated);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.radio-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.radio-meta-title {
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.radio-meta-artist {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.radio-screen-progress {
+  width: min(600px, 80vw);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.radio-screen-controls {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.radio-transport-btn {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.radio-transport-btn.main {
+  width: 68px;
+  height: 68px;
+  background: var(--accent-primary);
+  color: var(--accent-primary-fg);
+  border: none;
+}
+
+.radio-transport-btn.active {
+  background: var(--accent-primary);
+  color: var(--accent-primary-fg);
+  border-color: var(--accent-primary);
+}
+
+.radio-screen-volume {
+  width: min(300px, 60vw);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+}
+
+.radio-screen-queue {
+  width: min(600px, 80vw);
+  max-height: 16vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.radio-screen-queue-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--bg-surface-elevated);
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.radio-unlock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  background: rgba(0, 0, 0, 0.9);
+  color: #fff;
+  text-align: center;
+}
+
+.radio-unlock-btn {
+  padding: 18px 40px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  border-radius: var(--radius-lg);
+  border: none;
+  background: var(--accent-primary);
+  color: var(--accent-primary-fg);
+  cursor: pointer;
+}

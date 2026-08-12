@@ -84,7 +84,7 @@ class ConnectionManager:
         # propre kiosk primaire (premier arrivé), source de la position de SA
         # lecture. Un kiosk câblé et un kiosk réseau ne se disputent jamais
         # le rôle.
-        self._kiosk_connections: dict[str, list[WebSocket]] = {"cable": [], "network": []}
+        self._kiosk_connections: dict[str, list[WebSocket]] = {"cable": [], "network": [], "radio": []}
         # Canal déclaré par chaque kiosk à son identify (pour le retrait).
         self._kiosk_channel: dict[WebSocket, str] = {}
 
