@@ -262,6 +262,12 @@ export default function RadioRemotePage() {
           <input type="checkbox" checked={shuffleOnLoad} onChange={(e) => setShuffleOnLoad(e.target.checked)} />
           {t("radioRemote.shuffleOnLoad")}
         </label>
+        {/* Lecture aléatoire de TOUTE la bibliothèque, sans playlist (réf.
+            demande user) : indépendant du sélecteur ci-dessus. */}
+        <button className="btn btn-secondary" style={{ width: "100%", marginTop: "10px" }} onClick={() => sendCommand("radio_shuffle_all")}>
+          <Icon name="shuffle" size={16} />
+          {t("radioRemote.shuffleAll")}
+        </button>
         {playlists.length === 0 && <p className="live-empty" style={{ marginTop: "12px" }}>{t("radioRemote.noPlaylists")}</p>}
       </div>
 

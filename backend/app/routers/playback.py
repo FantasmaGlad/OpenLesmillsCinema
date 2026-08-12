@@ -639,6 +639,15 @@ async def _handle_radio_command(
             playlist.id, playlist.name, tracks, shuffle=params.get("shuffle"), client_ts=client_ts
         )
         log_activity(db, "radio_playlist_started", playlist.name)
+    elif command == "radio_shuffle_all":
+        # Lecture aléatoire de TOUTE la bibliothèque, sans playlist (réf. demande
+        # user) : playlist_id=None, tous les morceaux mélangés à la volée.
+        tracks = [_radio_track_dict(t) for t in db.query(RadioTrack).all()]
+        if not tracks:
+            logger.info("Commande radio_shuffle_all : bibliothèque radio vide")
+            return
+        await manager.load_playlist(None, "Toute la bibliothèque", tracks, shuffle=True, client_ts=client_ts)
+        log_activity(db, "radio_shuffle_all_started", f"{len(tracks)} morceau(x)")
     elif command == "play":
         await manager.play(client_ts)
     elif command == "pause":
