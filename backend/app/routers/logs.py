@@ -65,3 +65,39 @@ def download_technical_log():
     if not log_path.exists():
         return PlainTextResponse("", media_type="text/plain")
     return FileResponse(log_path, filename="openlesmillscinema-technical.log", media_type="text/plain")
+
+
+@router.delete("/activity")
+def delete_activity_logs(
+    ids: List[int] | None = Query(None),
+    limit: int | None = Query(None, gt=0),
+    db: Session = Depends(get_db),
+):
+    """Supprime des logs d'activité (réf. retour utilisateur "possibilité de
+    supprimer les derniers logs") : par identifiants précis (sélection dans
+    le tableau), les `limit` plus récents (purge), ou tout si aucun des deux
+    n'est fourni (bouton "vider")."""
+    if ids:
+        deleted = db.query(ActivityLog).filter(ActivityLog.id.in_(ids)).delete(synchronize_session=False)
+    elif limit:
+        recent_ids = [
+            row.id for row in db.query(ActivityLog.id).order_by(ActivityLog.id.desc()).limit(limit).all()
+        ]
+        deleted = (
+            db.query(ActivityLog).filter(ActivityLog.id.in_(recent_ids)).delete(synchronize_session=False)
+            if recent_ids else 0
+        )
+    else:
+        deleted = db.query(ActivityLog).delete(synchronize_session=False)
+    db.commit()
+    return {"message": f"{deleted} entrée(s) supprimée(s)", "deleted": deleted}
+
+
+@router.delete("/technical")
+def clear_technical_log():
+    """Vide le log technique (réf. retour utilisateur "possibilité de
+    supprimer les derniers logs")."""
+    log_path = settings.technical_log_path
+    if log_path.exists():
+        log_path.write_text("", encoding="utf-8")
+    return {"message": "Log technique vidé"}

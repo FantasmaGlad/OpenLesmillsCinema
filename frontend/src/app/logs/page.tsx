@@ -49,15 +49,58 @@ export default function LogsPage() {
   const [loading, setLoading] = useState(true);
   const [technicalLog, setTechnicalLog] = useState("");
   const [technicalLoading, setTechnicalLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [purgeCount, setPurgeCount] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(false);
 
   const fetchActivity = () => {
     setLoading(true);
+    setSelectedIds([]);
     const qs = filter ? `?event_type=${encodeURIComponent(filter)}` : "";
     fetch(getApiUrl(`/logs/activity${qs}`), { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : []))
       .then(setEntries)
       .catch(() => setEntries([]))
       .finally(() => setLoading(false));
+  };
+
+  const toggleSelected = (id: number) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => (prev.length === entries.length ? [] : entries.map((e) => e.id)));
+  };
+
+  const deleteActivity = (params: { ids?: number[]; limit?: number }, confirmMessage: string) => {
+    if (!window.confirm(confirmMessage)) return;
+    setDeleting(true);
+    setDeleteError(false);
+    const qs = new URLSearchParams();
+    if (params.ids) params.ids.forEach((id) => qs.append("ids", String(id)));
+    if (params.limit) qs.set("limit", String(params.limit));
+    fetch(getApiUrl(`/logs/activity?${qs.toString()}`), { method: "DELETE" })
+      .then((res) => {
+        if (!res.ok) throw new Error("delete failed");
+        setPurgeCount("");
+        fetchActivity();
+      })
+      .catch(() => setDeleteError(true))
+      .finally(() => setDeleting(false));
+  };
+
+  const clearTechnicalLog = () => {
+    if (!window.confirm(t("logs.clearTechnicalConfirm"))) return;
+    setDeleting(true);
+    setDeleteError(false);
+    fetch(getApiUrl("/logs/technical"), { method: "DELETE" })
+      .then((res) => {
+        if (!res.ok) throw new Error("delete failed");
+        fetchTechnical();
+      })
+      .catch(() => setDeleteError(true))
+      .finally(() => setDeleting(false));
   };
 
   useEffect(() => {
@@ -113,8 +156,52 @@ export default function LogsPage() {
               <button className="btn btn-secondary" onClick={fetchActivity}>
                 {t("logs.refresh")}
               </button>
+              <input
+                type="number"
+                min={1}
+                className="form-control"
+                style={{ width: "110px" }}
+                placeholder={t("logs.purgeRecentPlaceholder")}
+                title={t("logs.purgeRecentLabel")}
+                value={purgeCount}
+                onChange={(e) => setPurgeCount(e.target.value)}
+              />
+              <button
+                className="btn btn-secondary"
+                disabled={deleting || !purgeCount || Number(purgeCount) <= 0}
+                onClick={() =>
+                  deleteActivity(
+                    { limit: Number(purgeCount) },
+                    t("logs.purgeRecentConfirm", { count: Number(purgeCount) })
+                  )
+                }
+              >
+                {t("logs.purgeRecentButton")}
+              </button>
+              {selectedIds.length > 0 && (
+                <button
+                  className="btn btn-danger"
+                  disabled={deleting}
+                  onClick={() =>
+                    deleteActivity(
+                      { ids: selectedIds },
+                      t("logs.deleteSelectionConfirm", { count: selectedIds.length })
+                    )
+                  }
+                >
+                  {t("logs.deleteSelection")} ({selectedIds.length})
+                </button>
+              )}
+              <button
+                className="btn btn-danger"
+                disabled={deleting || entries.length === 0}
+                onClick={() => deleteActivity({}, t("logs.clearActivityConfirm"))}
+              >
+                {t("logs.clearLogs")}
+              </button>
             </div>
           </div>
+          {deleteError && <p className="live-empty">{t("logs.deleteError")}</p>}
 
           {loading ? (
             <div className="live-empty">{t("logs.loadingActivity")}</div>
@@ -125,6 +212,14 @@ export default function LogsPage() {
               <table className="videos-table">
                 <thead>
                   <tr>
+                    <th style={{ width: "36px" }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.length === entries.length && entries.length > 0}
+                        onChange={toggleSelectAll}
+                        title={t("logs.selectAll")}
+                      />
+                    </th>
                     <th style={{ width: "180px" }}>{t("logs.timestampHeader")}</th>
                     <th style={{ width: "220px" }}>{t("logs.eventHeader")}</th>
                     <th>{t("logs.detailHeader")}</th>
@@ -133,6 +228,13 @@ export default function LogsPage() {
                 <tbody>
                   {entries.map((entry) => (
                     <tr key={entry.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(entry.id)}
+                          onChange={() => toggleSelected(entry.id)}
+                        />
+                      </td>
                       <td style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
                         {formatTimestamp(entry.timestamp, language)}
                       </td>
@@ -152,11 +254,15 @@ export default function LogsPage() {
               <button className="btn btn-secondary" onClick={fetchTechnical}>
                 {t("logs.refresh")}
               </button>
+              <button className="btn btn-danger" disabled={deleting || !technicalLog} onClick={clearTechnicalLog}>
+                {t("logs.clearLogs")}
+              </button>
               <a href={getApiUrl("/logs/technical/download")} download className="btn btn-secondary">
                 {t("logs.downloadFullLog")}
               </a>
             </div>
           </div>
+          {deleteError && <p className="live-empty">{t("logs.deleteError")}</p>}
           <div
             style={{
               background: "var(--bg-surface)",
