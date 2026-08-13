@@ -71,22 +71,31 @@ export default function RadioAnnouncementsPage() {
   const { uploads, addUploads } = useUploadManager();
   const seenDoneIds = useRef<Set<string>>(new Set());
 
-  // Bascule l'attribut `webkitdirectory` sur l'input caché selon le mode (réf.
-  // pattern déjà en place pour la bibliothèque radio) : posé impérativement,
-  // React ne gère pas proprement cet attribut booléen non standard en JSX.
-  useEffect(() => {
+  // `webkitdirectory` posé/retiré juste avant `click()`, dans le même
+  // gestionnaire (pas via un effet React) : un setUploadMode() suivi d'un
+  // click() synchrone ouvrirait le sélecteur natif avant que l'attribut
+  // n'ait eu le temps d'être appliqué par le re-rendu (réf. même correctif
+  // que la bibliothèque radio).
+  const openFilePicker = () => {
+    setUploadMode("file");
     const el = fileInputRef.current;
     if (!el) return;
-    if (uploadMode === "folder") {
-      el.setAttribute("webkitdirectory", "");
-      el.setAttribute("directory", "");
-      el.multiple = true;
-    } else {
-      el.removeAttribute("webkitdirectory");
-      el.removeAttribute("directory");
-      el.multiple = false;
-    }
-  }, [uploadMode]);
+    el.removeAttribute("webkitdirectory");
+    el.removeAttribute("directory");
+    el.multiple = false;
+    el.click();
+  };
+
+  const openFolderPicker = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setUploadMode("folder");
+    const el = fileInputRef.current;
+    if (!el) return;
+    el.setAttribute("webkitdirectory", "");
+    el.setAttribute("directory", "");
+    el.multiple = true;
+    el.click();
+  };
 
   const showToast = (message: string, type: ToastState["type"] = "success") => setToast({ message, type });
   useEffect(() => {
@@ -338,22 +347,11 @@ export default function RadioAnnouncementsPage() {
           {/* Import */}
           <div className="ra-card">
             <h3 className="ra-card-title"><Icon name="upload" size={18} /> {t("radioAnnouncements.importTitle")}</h3>
-            <p className="ra-card-hint">
-              {uploadMode === "file" ? t("radioAnnouncements.importHint") : t("radioAnnouncements.importFolderHint")}
-            </p>
-            <div className="view-toggle" style={{ marginBottom: "10px" }}>
-              <button type="button" className={`view-btn ${uploadMode === "file" ? "active" : ""}`} onClick={() => setUploadMode("file")}>
-                <Icon name="description" size={14} /> {t("radioAnnouncements.chooseFile")}
-              </button>
-              <button type="button" className={`view-btn ${uploadMode === "folder" ? "active" : ""}`} onClick={() => setUploadMode("folder")}>
-                <Icon name="folder" size={14} /> {t("radioAnnouncements.chooseFolder")}
-              </button>
-            </div>
 
             <div
               className={`upload-zone ${dragActive ? "drag-active" : ""}`}
               onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={openFilePicker}
             >
               <input
                 ref={fileInputRef}
@@ -367,12 +365,26 @@ export default function RadioAnnouncementsPage() {
                 }
               />
               <Icon name="cloud_upload" size={36} className="upload-icon" />
-              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: "8px 0 0" }}>
-                {uploadMode === "file" ? t("radioAnnouncements.dropFileHint") : t("radioAnnouncements.dropFolderHint")}
+              <p style={{ fontSize: "1rem", fontWeight: 800, color: "var(--text-main)", margin: "8px 0 0" }}>
+                {t("radioAnnouncements.importCta")}
               </p>
-              {uploadMode === "file" && selectedFileName && (
+              <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", margin: "2px 0 0" }}>
+                {t("radioAnnouncements.dropFileHint")}
+              </p>
+              {selectedFileName && (
                 <p style={{ fontSize: "0.8rem", fontWeight: 700, margin: "4px 0 0" }}>{selectedFileName}</p>
               )}
+              <button
+                type="button"
+                onClick={openFolderPicker}
+                style={{
+                  marginTop: "10px", background: "none", border: "none", padding: 0,
+                  color: "var(--accent-primary)", fontWeight: 700, fontSize: "0.8rem",
+                  cursor: "pointer", textDecoration: "underline",
+                }}
+              >
+                {t("radioAnnouncements.chooseFolder")}
+              </button>
             </div>
 
             {uploadMode === "file" && (

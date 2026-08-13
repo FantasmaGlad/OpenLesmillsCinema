@@ -105,7 +105,12 @@ export default function RadioLibraryPage() {
 
   // Import (modale)
   const [importOpen, setImportOpen] = useState(false);
-  const [uploadMode, setUploadMode] = useState<"files" | "folder" | "zip">("files");
+  // Réf. simplification "juste le logo import, précisé en dessous zip/dossier/
+  // pistes" : ZIP et pistes partagent désormais le même sélecteur générique
+  // (détecté après coup à la sélection, cf. startFilesUpload) — seul le
+  // dossier a encore besoin d'un mode dédié (sélecteur natif différent,
+  // webkitdirectory).
+  const [uploadMode, setUploadMode] = useState<"files" | "folder">("files");
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -184,41 +189,53 @@ export default function RadioLibraryPage() {
   const trackCoverUrl = (id: number) => `${getApiUrl(`/radio/tracks/${id}/cover`)}?v=${coverVersion}`;
 
   // ---- Import ----
-  // Bascule l'attribut `webkitdirectory` sur l'input caché selon le mode : en
-  // mode « dossier », le sélecteur natif choisit un dossier entier (contenu
-  // renvoyé récursivement) plutôt que des fichiers isolés. Posé impérativement
-  // (React ne gère pas proprement cet attribut booléen non standard en JSX).
-  useEffect(() => {
+  // `webkitdirectory` est posé/retiré juste avant `click()`, dans le même
+  // gestionnaire (pas via un effet React) : entre un `setUploadMode(...)` et
+  // le re-rendu qui suivrait, `click()` ouvrirait le sélecteur natif AVANT
+  // que l'attribut n'ait eu le temps d'être appliqué — l'utilisateur verrait
+  // le mauvais type de sélecteur (fichiers au lieu de dossier ou l'inverse).
+  const openFilesPicker = () => {
+    setUploadMode("files");
     const el = fileInputRef.current;
     if (!el) return;
-    if (uploadMode === "folder") {
-      el.setAttribute("webkitdirectory", "");
-      el.setAttribute("directory", "");
-    } else {
-      el.removeAttribute("webkitdirectory");
-      el.removeAttribute("directory");
-    }
-  }, [uploadMode, importOpen]);
+    el.removeAttribute("webkitdirectory");
+    el.removeAttribute("directory");
+    el.click();
+  };
 
-  const startFilesUpload = (fileList: FileList | null) => {
+  const openFolderPicker = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setUploadMode("folder");
+    const el = fileInputRef.current;
+    if (!el) return;
+    el.setAttribute("webkitdirectory", "");
+    el.setAttribute("directory", "");
+    el.click();
+  };
+
+  const startFilesUpload = (fileList: FileList | null, modeOverride?: "files" | "folder") => {
     if (!fileList || fileList.length === 0) return;
+    // `modeOverride` pour le dépôt glisser-déposer (cf. handleFileDrop) : un
+    // setUploadMode() juste avant cet appel n'aurait pas encore été appliqué
+    // (état React asynchrone) au moment où cette fonction lit `uploadMode`.
+    const mode = modeOverride ?? uploadMode;
     let files = Array.from(fileList);
-    if (uploadMode === "zip") {
+    if (mode === "folder") {
+      const folderName = files[0].webkitRelativePath?.split("/")[0] || t("radioLibrary.folder");
+      files = files.filter((f) => isAudioFile(f.name));
+      if (files.length === 0) {
+        showToast(t("radioLibrary.noAudioInFolder"), "warning");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+      addUploads([{ kind: "radio_files", files, title: `${folderName} (${files.length})` }]);
+    } else if (files.length === 1 && files[0].name.toLowerCase().endsWith(".zip")) {
+      // Une seule archive ZIP sélectionnée/déposée : détectée automatiquement,
+      // pas besoin d'un mode dédié (réf. simplification de l'import).
       addUploads([{ kind: "radio_zip", file: files[0], title: files[0].name }]);
     } else {
-      if (uploadMode === "folder") {
-        const folderName = files[0].webkitRelativePath?.split("/")[0] || t("radioLibrary.folder");
-        files = files.filter((f) => isAudioFile(f.name));
-        if (files.length === 0) {
-          showToast(t("radioLibrary.noAudioInFolder"), "warning");
-          if (fileInputRef.current) fileInputRef.current.value = "";
-          return;
-        }
-        addUploads([{ kind: "radio_files", files, title: `${folderName} (${files.length})` }]);
-      } else {
-        const title = files.length > 1 ? `${files[0].name} (+${files.length - 1})` : files[0].name;
-        addUploads([{ kind: "radio_files", files, title }]);
-      }
+      const title = files.length > 1 ? `${files[0].name} (+${files.length - 1})` : files[0].name;
+      addUploads([{ kind: "radio_files", files, title }]);
     }
     showToast(t("radioLibrary.importStarted"));
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -234,7 +251,11 @@ export default function RadioLibraryPage() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    startFilesUpload(e.dataTransfer.files);
+    // Un dépôt glisser-déposer n'est jamais le résultat du sélecteur dossier
+    // natif (webkitdirectory) — toujours des fichiers à plat, quel que soit
+    // le dernier mode utilisé au clic (cf. modeOverride, évite le décalage
+    // d'un setUploadMode() asynchrone).
+    startFilesUpload(e.dataTransfer.files, "files");
   };
 
   // ---- Édition d'un morceau ----
@@ -804,16 +825,25 @@ export default function RadioLibraryPage() {
             </div>
             <div className={`upload-zone ${dragActive ? "drag-active" : ""}`}
               onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleFileDrop}
-              onClick={() => fileInputRef.current?.click()}>
-              <input ref={fileInputRef} type="file" accept={uploadMode === "zip" ? ".zip" : "audio/*"} multiple={uploadMode !== "zip"}
+              onClick={openFilesPicker}>
+              <input ref={fileInputRef} type="file" accept="audio/*,.zip" multiple
                 style={{ display: "none" }} onChange={(e) => startFilesUpload(e.target.files)} />
-              <div className="view-toggle" onClick={(e) => e.stopPropagation()} style={{ marginBottom: "8px", flexWrap: "wrap" }}>
-                <button type="button" className={`view-btn ${uploadMode === "files" ? "active" : ""}`} onClick={() => setUploadMode("files")}>{t("radioLibrary.chooseFiles")}</button>
-                <button type="button" className={`view-btn ${uploadMode === "folder" ? "active" : ""}`} onClick={() => setUploadMode("folder")}>{t("radioLibrary.chooseFolder")}</button>
-                <button type="button" className={`view-btn ${uploadMode === "zip" ? "active" : ""}`} onClick={() => setUploadMode("zip")}>{t("radioLibrary.chooseZip")}</button>
-              </div>
-              <Icon name="cloud_upload" size={48} className="upload-icon" />
-              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: "8px 0 0" }}>{t("radioLibrary.importHint")}</p>
+              <Icon name="cloud_upload" size={44} className="upload-icon" />
+              <p style={{ fontSize: "1rem", fontWeight: 800, color: "var(--text-main)", margin: "10px 0 0" }}>
+                {t("radioLibrary.importCta")}
+              </p>
+              <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", margin: "2px 0 0" }}>{t("radioLibrary.importHint")}</p>
+              <button
+                type="button"
+                onClick={openFolderPicker}
+                style={{
+                  marginTop: "10px", background: "none", border: "none", padding: 0,
+                  color: "var(--accent-primary)", fontWeight: 700, fontSize: "0.8rem",
+                  cursor: "pointer", textDecoration: "underline",
+                }}
+              >
+                {t("radioLibrary.chooseFolder")}
+              </button>
             </div>
           </div>
         </div>
