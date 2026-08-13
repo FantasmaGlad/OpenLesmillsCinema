@@ -228,6 +228,7 @@ if $DO_UNINSTALL; then
     run rm -f /etc/wireplumber/wireplumber.conf.d/51-fix-jack-autoport.conf
     run rm -f /etc/systemd/system/powertop.service.d/10-audio-nopowersave.conf
     run rm -f /usr/local/bin/openlesmillscinema
+    run rm -f /usr/local/sbin/openlesmillscinema-uninstall
     if command -v nft >/dev/null 2>&1; then
         run nft delete table ip olmc_redirect 2>/dev/null || true
     fi
@@ -575,6 +576,23 @@ esac
 EOF
 run chmod +x /usr/local/bin/openlesmillscinema
 ok "commande 'openlesmillscinema' installée"
+
+# ---------------------------------------------------------------------------
+step "Désinstalleur détaché (bouton « Désinstaller » de l'UI)"
+# ---------------------------------------------------------------------------
+# Enveloppe lancée en root (règle sudoers dédiée ci-dessous) par le backend
+# quand l'utilisateur confirme la désinstallation depuis Paramètres. systemd-run
+# détache l'opération dans une unité transitoire : sans cela, l'arrêt du service
+# backend (déclenché par --uninstall) tuerait le script lui-même, qui tourne
+# dans le même cgroup. La désinstallation elle-même reste celle, déjà testée,
+# de --uninstall --purge --purge-data (services + config + app + données, sans
+# toucher aux paquets apt partagés).
+write_file /usr/local/sbin/openlesmillscinema-uninstall <<EOF
+#!/usr/bin/env bash
+exec systemd-run --collect --unit=olmc-uninstall --description="OpenLesmillsCinema uninstall" ${REPO_DIR}/install.sh --uninstall --purge --purge-data -y
+EOF
+run chmod +x /usr/local/sbin/openlesmillscinema-uninstall
+ok "désinstalleur '/usr/local/sbin/openlesmillscinema-uninstall' installé"
 step_done
 
 # ---------------------------------------------------------------------------
@@ -890,9 +908,14 @@ if $NO_KIOSK; then
 else
     SUDOERS_UNITS="/usr/bin/systemctl restart openlesmillscinema-backend.service, /usr/bin/systemctl restart openlesmillscinema-kiosk.service"
 fi
+# Enveloppe de désinstallation (bouton « Désinstaller » de l'UI) : commande
+# unique, sans argument, qui détache le --uninstall via systemd-run.
+SUDOERS_UNITS="${SUDOERS_UNITS}, /usr/local/sbin/openlesmillscinema-uninstall"
 write_file /etc/sudoers.d/openlesmillscinema <<EOF
-# Autorise UNIQUEMENT le redémarrage de ces unités précises, sans mot de
-# passe, pour le bouton de réinitialisation des paramètres de synchronisation.
+# Autorise UNIQUEMENT ces commandes précises, sans mot de passe :
+#   - le redémarrage des unités (bouton de réinitialisation des paramètres) ;
+#   - l'enveloppe de désinstallation /usr/local/sbin/openlesmillscinema-uninstall
+#     (bouton « Désinstaller », remise à zéro complète).
 # Ne JAMAIS élargir à d'autres commandes ni remplacer par NOPASSWD: ALL.
 ${TARGET_USER} ALL=(root) NOPASSWD: ${SUDOERS_UNITS}
 EOF

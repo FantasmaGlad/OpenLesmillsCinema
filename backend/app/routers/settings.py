@@ -343,3 +343,54 @@ async def reset_system(background_tasks: BackgroundTasks) -> dict[str, str]:
     """
     background_tasks.add_task(_run_full_reset)
     return {"message": "Réinitialisation en cours : tous les écrans vont se recharger."}
+
+
+# ---------------------------------------------------------------------------
+# Désinstallation complète (bouton « Désinstaller » — remise à zéro machine)
+# ---------------------------------------------------------------------------
+UNINSTALL_WRAPPER = Path("/usr/local/sbin/openlesmillscinema-uninstall")
+SUDOERS_FILE = Path("/etc/sudoers.d/openlesmillscinema")
+
+
+class UninstallRequest(BaseModel):
+    confirm: str
+
+
+async def _run_uninstall():
+    """Laisse la réponse HTTP partir, puis déclenche l'enveloppe de
+    désinstallation en root (règle sudoers dédiée posée par install.sh).
+    L'enveloppe détache l'opération via systemd-run : le backend sera arrêté
+    pendant la remise à zéro, mais l'unité transitoire lui survit."""
+    await asyncio.sleep(1.0)
+    try:
+        subprocess.Popen(["sudo", str(UNINSTALL_WRAPPER)], start_new_session=True)
+        logger.info("Désinstallation déclenchée (enveloppe systemd-run détachée).")
+    except Exception as e:
+        logger.error(f"Échec du lancement de la désinstallation : {e}")
+
+
+@router.post("/system/uninstall")
+async def uninstall_system(payload: UninstallRequest, background_tasks: BackgroundTasks) -> dict[str, str]:
+    """Remise à zéro complète de la machine (réf. bouton « Désinstaller ») :
+    services systemd + config /etc + application + venv + TOUTES les données,
+    via l'enveloppe /usr/local/sbin/openlesmillscinema-uninstall (appelée en
+    root sans mot de passe grâce à la règle sudoers dédiée). Les paquets apt
+    partagés ne sont PAS retirés. Action IRRÉVERSIBLE — l'UI exige une phrase
+    de confirmation avant cet appel.
+
+    Hors d'une installation cible (enveloppe/sudoers absents, ex. poste de
+    dev), renvoie 400 avec la marche à suivre manuelle plutôt que d'échouer
+    silencieusement."""
+    phrase = payload.confirm.strip().upper().replace("É", "E")
+    if phrase != "DESINSTALLER":
+        raise HTTPException(status_code=400, detail="Phrase de confirmation incorrecte.")
+    if not UNINSTALL_WRAPPER.exists() or not SUDOERS_FILE.exists():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Cette machine n'est pas une installation gérée (désinstalleur système absent). "
+                "Depuis un poste de dev, lancez à la main : sudo ./install.sh --uninstall --purge --purge-data"
+            ),
+        )
+    background_tasks.add_task(_run_uninstall)
+    return {"message": "Désinstallation lancée : la machine se remet à zéro, le service va s'arrêter et l'interface deviendra injoignable."}
