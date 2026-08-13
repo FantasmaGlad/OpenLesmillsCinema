@@ -411,7 +411,6 @@ export default function RadioScreenPage() {
   const currentTrack = state.current_track;
   const coverSrc = currentTrack?.cover_url ? getApiUrl(currentTrack.cover_url) : null;
   const duration = state.duration_seconds ?? currentTrack?.duration_seconds ?? 0;
-  const queue = state.index !== null ? state.order.slice(state.index + 1) : [];
 
   const handlePlayPause = () => sendCommand(state.playing ? "pause" : "play");
   const handleRepeatCycle = () => {
@@ -533,17 +532,6 @@ export default function RadioScreenPage() {
             />
             <span>{state.volume}%</span>
           </div>
-
-          {queue.length > 0 && (
-            <div className="radio-screen-queue">
-              {queue.map((track, i) => (
-                <div key={`${track.id}-${i}`} className="radio-screen-queue-item">
-                  <span>{track.title}</span>
-                  <span>{track.artist || t("radioLibrary.unknownArtist")}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </>
       )}
     </div>
