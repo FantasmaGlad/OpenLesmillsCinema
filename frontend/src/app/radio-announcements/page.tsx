@@ -162,14 +162,17 @@ export default function RadioAnnouncementsPage() {
 
   const handleFolderUpload = (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
-    const folderName = fileList[0].webkitRelativePath?.split("/")[0] || t("radioAnnouncements.folder");
     const files = Array.from(fileList).filter((f) => isAudioFile(f.name));
     if (files.length === 0) {
       showToast(t("radioAnnouncements.noAudioInFolder"), "warning");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
-    addUploads([{ kind: "radio_announcement_files", files, title: `${folderName} (${files.length})` }]);
+    // Une tâche (donc une ligne de progression) par rappel, comme les vidéos
+    // et la bibliothèque radio (réf. « on ne voit qu'un chargement du premier
+    // audio »). L'endpoint /announcements/upload-batch accepte une liste : un
+    // fichier par requête crée un job distinct, suivi 1-par-1.
+    addUploads(files.map((f) => ({ kind: "radio_announcement_files" as const, files: [f], title: f.name })));
     showToast(t("radioAnnouncements.importStarted"));
     if (fileInputRef.current) fileInputRef.current.value = "";
   };

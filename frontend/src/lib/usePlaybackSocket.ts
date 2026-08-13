@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { clearCachesAndReload } from "@/lib/cacheReload";
 
 export type PlaybackStateValue =
   | "waiting"
@@ -366,11 +367,11 @@ export function usePlaybackSocket(
             return;
           }
           if (parsed.event === "force_reload") {
-            // Bouton de réinitialisation complète (réf. audit
-            // plan-corrections-bugs, point 4) : recharge la page pour
-            // reprendre à zéro (état React, connexion WebSocket, éventuelle
-            // nouvelle version du build statique).
-            window.location.reload();
+            // Bouton « Synchronisation des écrans » (Paramètres) : vide les
+            // caches de l'appareil PUIS recharge, pour reprendre à zéro (état
+            // React, connexion WebSocket) ET re-télécharger les nouveaux
+            // assets au lieu de resservir d'anciennes versions cachées.
+            void clearCachesAndReload();
             return;
           }
           if (parsed.event === "state_change" || parsed.event === "position_tick") {

@@ -388,7 +388,7 @@ export default function SettingsPage() {
         <h3><Icon name="sync" size={18} /> {t("settingsPage.syncSection")}</h3>
         <p className="settings-hint" style={{ marginTop: 0 }}>{t("settingsPage.syncHint")}</p>
         <button type="button" className="btn btn-secondary" style={{ height: "44px", alignSelf: "flex-start" }} onClick={() => setShowResetConfirm(true)}>
-          <Icon name="restart_alt" size={16} /> {t("settingsPage.syncResetButton")}
+          <Icon name="sync" size={16} /> {t("settingsPage.syncResetButton")}
         </button>
       </section>
 

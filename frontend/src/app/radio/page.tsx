@@ -431,12 +431,19 @@ export default function RadioScreenPage() {
     setUnlocked(true);
     ensureAudioGraph(state.volume);
     audioCtxRef.current?.resume().catch(() => {});
+    // Déverrouiller le poste NE lance JAMAIS de son par lui-même quand aucune
+    // radio n'est active : sans piste courante (état « idle »), on se contente
+    // d'armer le contexte audio pour un futur lancement. Démarrer une lecture
+    // ici désynchroniserait l'interface admin (le poste deviendrait source de
+    // position sur un état fantôme). On ne (re)prend le son que si le SERVEUR
+    // signale une radio réellement en cours de lecture.
+    const radioIsActive = !!state.current_track && state.state !== "idle";
     const el = getAudioEl(activeSlotRef.current);
-    if (el && state.playing && state.current_track) {
+    if (el && radioIsActive && state.playing) {
       el.play().catch(() => {});
     }
     const announcementAudio = announcementAudioRef.current;
-    if (announcementAudio && state.current_announcement) {
+    if (announcementAudio && radioIsActive && state.current_announcement) {
       announcementAudio.play().catch(() => {});
     }
   };
@@ -470,7 +477,7 @@ export default function RadioScreenPage() {
 
       {!unlocked && (
         <div className="radio-unlock-overlay">
-          <AppLogo size={72} />
+          <AppLogo className="radio-unlock-logo" />
           <div>
             <div style={{ fontSize: "1.4rem", fontWeight: 800, marginBottom: "8px" }}>{t("radioScreen.unlockTitle")}</div>
             <div style={{ color: "var(--text-muted)" }}>{t("radioScreen.unlockHint")}</div>
@@ -484,7 +491,7 @@ export default function RadioScreenPage() {
 
       {!currentTrack ? (
         <>
-          <AppLogo size={90} />
+          <AppLogo className="radio-brand-logo" />
           <span className="radio-screen-clock">{formatClock(now)}</span>
           <span className="radio-screen-idle-label">
             {connected ? t("radioScreen.idleHint") : t("radioRemote.disconnected")}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { clearCachesAndReload } from "@/lib/cacheReload";
 
 /** Réf. docs/cahier-des-charges-radio.md, lot L3 — état du 3e canal `radio`,
  * moteur INDÉPENDANT du câblé/réseau (RadioPlaybackManager côté backend).
@@ -163,7 +164,9 @@ export function useRadioSocket(onEvent?: (evt: RadioEvent) => void, role?: "kios
           // Évènements pertinents pour d'autres canaux (display_output,
           // cinema_*...) : sans objet ici, ignorés.
           if (parsed.event === "force_reload") {
-            window.location.reload();
+            // Cf. usePlaybackSocket : vide les caches puis recharge (bouton
+            // « Synchronisation des écrans » — nouveaux assets re-téléchargés).
+            void clearCachesAndReload();
             return;
           }
           if (parsed.event === "state_change" && parsed.channel === "radio") {

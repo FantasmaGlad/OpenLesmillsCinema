@@ -221,21 +221,26 @@ export default function RadioLibraryPage() {
     const mode = modeOverride ?? uploadMode;
     let files = Array.from(fileList);
     if (mode === "folder") {
-      const folderName = files[0].webkitRelativePath?.split("/")[0] || t("radioLibrary.folder");
       files = files.filter((f) => isAudioFile(f.name));
       if (files.length === 0) {
         showToast(t("radioLibrary.noAudioInFolder"), "warning");
         if (fileInputRef.current) fileInputRef.current.value = "";
         return;
       }
-      addUploads([{ kind: "radio_files", files, title: `${folderName} (${files.length})` }]);
+      // UNE tâche par morceau (réf. « on ne voit qu'un chargement du premier
+      // audio ») : comme les vidéos, chaque fichier a sa propre ligne de
+      // progression dans le panneau d'import, au lieu d'un seul lot opaque.
+      // L'endpoint /radio/tracks/upload accepte une liste — un fichier par
+      // requête crée un job d'import distinct, donc un suivi 1-par-1.
+      addUploads(files.map((f) => ({ kind: "radio_files" as const, files: [f], title: f.name })));
     } else if (files.length === 1 && files[0].name.toLowerCase().endsWith(".zip")) {
       // Une seule archive ZIP sélectionnée/déposée : détectée automatiquement,
       // pas besoin d'un mode dédié (réf. simplification de l'import).
       addUploads([{ kind: "radio_zip", file: files[0], title: files[0].name }]);
     } else {
-      const title = files.length > 1 ? `${files[0].name} (+${files.length - 1})` : files[0].name;
-      addUploads([{ kind: "radio_files", files, title }]);
+      // Idem sélection multiple de fichiers : une tâche (donc une ligne de
+      // suivi) par morceau.
+      addUploads(files.map((f) => ({ kind: "radio_files" as const, files: [f], title: f.name })));
     }
     showToast(t("radioLibrary.importStarted"));
     if (fileInputRef.current) fileInputRef.current.value = "";

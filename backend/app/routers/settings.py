@@ -366,7 +366,7 @@ async def reset_system(background_tasks: BackgroundTasks) -> dict[str, str]:
     cet endpoint.
     """
     background_tasks.add_task(_run_full_reset)
-    return {"message": "Réinitialisation en cours : tous les écrans vont se recharger."}
+    return {"message": "Synchronisation en cours : les écrans vident leur cache et rechargent les nouveaux assets."}
 
 
 # ---------------------------------------------------------------------------

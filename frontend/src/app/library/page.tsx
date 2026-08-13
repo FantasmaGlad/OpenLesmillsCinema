@@ -166,6 +166,34 @@ export default function LibraryPage() {
     });
   };
 
+  // Sélection groupée (réf. demande « impossible de faire une sélection
+  // groupée ») : cases « tout sélectionner » (par groupe de programme en vue
+  // grille, globale en vue liste) + sélection par plage au Maj-clic en liste.
+  const setManySelected = (ids: number[], select: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (select) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  };
+  const allSelected = (ids: number[]) => ids.length > 0 && ids.every((id) => selectedIds.has(id));
+
+  // Dernière ligne cochée en vue liste, pour la sélection par plage (Maj-clic).
+  const lastListIndexRef = useRef<number | null>(null);
+  const handleRowCheckboxClick = (e: React.MouseEvent, index: number, id: number) => {
+    if (e.shiftKey && lastListIndexRef.current !== null && lastListIndexRef.current !== index) {
+      const [a, b] = [lastListIndexRef.current, index].sort((x, y) => x - y);
+      const select = !selectedIds.has(id);
+      setManySelected(videos.slice(a, b + 1).map((v) => v.id), select);
+    } else {
+      toggleSelected(id);
+    }
+    lastListIndexRef.current = index;
+  };
+
   const clearSelection = () => setSelectedIds(new Set());
 
   const confirmBulkDelete = async () => {
@@ -652,7 +680,8 @@ export default function LibraryPage() {
             .map((group) => (
               <div key={group.program}>
                 {/* Couleur du thème plutôt que du programme (réf. correctif
-                    "couleurs hardcodées associées à un cours"). */}
+                    "couleurs hardcodées associées à un cours"). La case coche
+                    tout le groupe d'un coup (réf. « sélection groupée »). */}
                 <h3
                   style={{
                     fontSize: "0.85rem",
@@ -660,8 +689,18 @@ export default function LibraryPage() {
                     color: "var(--accent-primary)",
                   }}
                 >
-                  {group.program === "Autre" ? t("library.otherProgram") : group.program}{" "}
-                  <span style={{ color: "var(--text-dim)" }}>({group.items.length})</span>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", cursor: "pointer" }} title={t("library.selectGroupTitle")}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected(group.items.map((v) => v.id))}
+                      onChange={(e) => setManySelected(group.items.map((v) => v.id), e.target.checked)}
+                      style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                    />
+                    <span>
+                      {group.program === "Autre" ? t("library.otherProgram") : group.program}{" "}
+                      <span style={{ color: "var(--text-dim)" }}>({group.items.length})</span>
+                    </span>
+                  </label>
                 </h3>
                 <div className="videos-grid">
                   {group.items.map((video) => {
@@ -670,7 +709,7 @@ export default function LibraryPage() {
                     return (
                       <div
                         key={video.id}
-                        className={`video-card ${getProgramClass(video.program)}`}
+                        className={`video-card ${getProgramClass(video.program)}${isSelected ? " selected" : ""}`}
                         onClick={() => handleSelectVideo(video)}
                       >
                         <div className="thumbnail-wrapper">
@@ -716,7 +755,15 @@ export default function LibraryPage() {
           <table className="videos-table">
             <thead>
               <tr>
-                <th style={{ width: "36px" }}></th>
+                <th style={{ width: "36px" }}>
+                  <input
+                    type="checkbox"
+                    checked={allSelected(videos.map((v) => v.id))}
+                    onChange={(e) => setManySelected(videos.map((v) => v.id), e.target.checked)}
+                    title={t("library.selectAllTitle")}
+                    style={{ width: "18px", height: "18px", cursor: "pointer" }}
+                  />
+                </th>
                 <th style={{ width: "80px" }}>{t("library.thumbnailHeader")}</th>
                 <th>{t("library.titleHeader")}</th>
                 <th>{t("library.programHeader")}</th>
@@ -726,15 +773,17 @@ export default function LibraryPage() {
               </tr>
             </thead>
             <tbody>
-              {videos.map((video) => {
+              {videos.map((video, index) => {
                 const thumbSrc = getThumbnailSrc(video);
                 return (
-                  <tr key={video.id} onClick={() => handleSelectVideo(video)}>
+                  <tr key={video.id} className={selectedIds.has(video.id) ? "row-selected" : ""} onClick={() => handleSelectVideo(video)}>
                     <td onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={selectedIds.has(video.id)}
-                        onChange={() => toggleSelected(video.id)}
+                        onChange={() => {}}
+                        onClick={(e) => handleRowCheckboxClick(e, index, video.id)}
+                        title={t("library.selectAllTitle")}
                         style={{ width: "18px", height: "18px", cursor: "pointer" }}
                       />
                     </td>

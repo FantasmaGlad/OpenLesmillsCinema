@@ -150,7 +150,7 @@ Lorsqu'une programmation automatique (`scheduler`) doit démarrer alors qu'une l
 
 Sous-système musical « type Spotify » **totalement indépendant** des cours vidéo/audio coach (canal `radio` dédié, tables `radio_*`, gestionnaire d'état `radio_manager.py`) — bibliothèque, playlists, lecture continue, crossfade et rappels sonores. Cahier des charges complet, décisions et découpage en lots : [`docs/cahier-des-charges-radio.md`](docs/cahier-des-charges-radio.md).
 
-- **Surfaces** : `/radio` (écran du poste dédié — affichage + contrôles, ouvert à la main dans un navigateur, pas de service kiosk systemd), onglet admin « Radio » (télécommande à distance sur `/radio-remote`), « Piste Audio Radio » (bibliothèque sur `/radio-library`), « Rappels » (annonces sur `/radio-announcements`), et un 3ᵉ onglet « Radio » sur la page Planning (`/schedule/?channel=radio`).
+- **Surfaces** : `/radio` (écran du poste dédié — affichage + contrôles, ouvert à la main dans un navigateur, pas de service kiosk systemd), onglet admin « Radio » (télécommande à distance sur `/radio-remote`), « Piste Audio Radio » (bibliothèque sur `/radio-library`), « Rappels » (annonces sur `/radio-announcements`), et un 3ᵉ onglet « Radio » sur la page Planning (`/schedule/?channel=radio`). Hors diffusion (écran d'attente + overlay « Démarrer la radio »), le poste affiche un **grand logo plein écran** (fond opaque du thème) ; déverrouiller le poste **ne lance aucune musique** tant qu'aucune radio n'est réellement active (état `idle`), pour ne pas désynchroniser l'interface admin.
 - **Bibliothèque** : import tous formats audio (transcodage automatique de ce que le navigateur ne lit pas), pochettes extraites (ID3) ou manuelles, navigation par artiste/album/tags. L'écran admin « Piste Audio Radio » (`/radio-library`) est une **vue d'ensemble** : barre latérale de filtres (playlists / tags / genres / artistes), grille à sélection multiple avec actions groupées (taguer, ajouter à une playlist), tags éditables en chips, éditeur de playlist en glisser-déposer.
 - **Lecture** : continue, file d'attente, lecture aléatoire, répétition (piste/playlist), **crossfade** (Web Audio API — deux `<audio>` routés dans un graphe `MediaElementAudioSourceNode → GainNode → destination`, fondu démarré côté client en avance sur la confirmation serveur).
 - **Rappels** : annonces de bienséance avec description, règles de déclenchement (toutes les N musiques / toutes les X minutes / à heures fixes / manuel), insertion en attente de fin de piste ou par fondu immédiat (« duck » — réutilise le même graphe Web Audio que le crossfade). Chaque rappel est **normalisé en loudness à l'import** (`ffmpeg loudnorm` EBU R128, 2 passes, cible -10 LUFS) pour s'entendre au moins aussi fort que la musique. Écran d'admin dédié (`/radio-announcements`) : import, activation, règles, déclenchement manuel.
@@ -164,7 +164,7 @@ Sous-système musical « type Spotify » **totalement indépendant** des cours v
 Le mode **Audio Coach** permet de diffuser des cours audio (pistes vocales / musique) sur l'équipement sonore de la salle tout en affichant un fond visuel dynamique sur l'écran.
 
 - **Importation** : Support des fichiers MP3 individuellement ou par paquets ZIP.
-- **Fonds animés** : Boucles vidéo stockées dans `backend/data/backgrounds`, jouées en boucle infinie sans coupure.
+- **Fonds animés** : Boucles vidéo stockées dans `data/backgrounds` (arbre média unifié sous `${REPO_DIR}/data`), jouées en boucle infinie sans coupure.
 - **Minuteur d'enchaînement (`audio_chain_timer_seconds`)** : Délai de transition configurable entre deux pistes audio (modifiable depuis `/api/settings`).
 - **Lancement** : une playlist audio coach se lance depuis la page « Cours Audio » (`/audio`, actif uniquement quand le câblé est **déjà** en mode coach — sinon on passe d'abord par « Passer en mode coach » / `/coach`) ou directement depuis l'écran mobile `/coach`. Le raccourci autrefois présent sur le tableau de bord câblé a été déplacé ici.
 
@@ -203,7 +203,7 @@ Pas de service dédié pour le canal Radio (arbitrage A5, cf. §5) : `/radio` s'
 
 `install.sh` écrit `/etc/sudoers.d/bobine` autorisant **sans mot de passe, et uniquement**, deux actions déclenchées depuis l'admin :
 
-- le **redémarrage** des services (`systemctl restart`) — bouton « Réinitialisation complète » (Paramètres → Maintenance), qui recharge tous les écrans connectés puis relance backend + kiosque ;
+- le **redémarrage** des services (`systemctl restart`) — bouton « Synchronisation des écrans » (Paramètres → Maintenance) : chaque écran connecté **vide son cache navigateur** puis se recharge (re-télécharge les nouveaux assets), et le backend + le kiosque sont relancés. À utiliser après une mise à jour des médias ou en cas de comportement bloqué ;
 - l'enveloppe de **désinstallation** `/usr/local/sbin/bobine-uninstall` — bouton « Désinstaller » (Paramètres → **Zone de danger**). L'enveloppe détache la remise à zéro via `systemd-run` (pour survivre à l'arrêt du service backend) puis exécute `install.sh --uninstall --purge --purge-data -y` : arrêt/suppression des services + config `/etc` + application + venv + **toutes les données** (les paquets `apt` partagés sont conservés). L'UI exige de recopier la phrase « DÉSINSTALLER » ; hors machine installée (poste de dev), l'endpoint refuse proprement.
 
 ---
@@ -221,7 +221,7 @@ Pas de service dédié pour le canal Radio (arbitrage A5, cf. §5) : `/radio` s'
 | **Playlists Audio** | `/api/audio-playlists` | Playlists mixtes audio coach avec fonds |
 | **Planning** | `/api/schedule` | Programmateurs, occurrences et exceptions |
 | **Lecture** | `/api/playback` | Contrôle de la lecture (play, pause, seek, stop, reprise) |
-| **Paramètres** | `/api/settings` | Configuration dynamique (lecture/thème/langue), sortie vidéo, espace de stockage (`/settings/storage`), réinitialisation complète (`POST /settings/system/reset`) et désinstallation machine (`POST /settings/system/uninstall`, phrase de confirmation requise) |
+| **Paramètres** | `/api/settings` | Configuration dynamique (lecture/thème/langue), sortie vidéo, espace de stockage (`/settings/storage`), synchronisation des écrans (`POST /settings/system/reset` — vidage des caches + rechargement + relance des services) et désinstallation machine (`POST /settings/system/uninstall`, phrase de confirmation requise) |
 | **Imports** | `/api/import-jobs` | Suivi des tâches d'importation en arrière-plan |
 | **Logs** | `/api/logs` | Consultation et téléchargement des journaux système |
 | **Radio — Bibliothèque** | `/api/radio` | Morceaux (CRUD, artistes/albums/tags), playlists radio, état du canal (`/api/radio/state`) |
