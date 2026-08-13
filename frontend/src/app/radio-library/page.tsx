@@ -73,6 +73,15 @@ function formatDuration(seconds: number | null) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+// Extensions audio acceptées (miroir de AUDIO_EXTENSIONS côté backend) : sert
+// à filtrer les fichiers non-audio quand on importe un DOSSIER entier
+// (webkitdirectory renvoie tout le contenu, sous-dossiers compris).
+const AUDIO_EXTENSIONS = [
+  ".mp3", ".m4a", ".aac", ".mp4", ".ogg", ".oga", ".opus", ".webm", ".flac",
+  ".wav", ".wma", ".aiff", ".aif", ".aifc", ".ape", ".alac", ".wv", ".mka", ".m4b", ".ac3",
+];
+const isAudioFile = (name: string) => AUDIO_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext));
+
 export default function RadioLibraryPage() {
   const { t } = useAppSettings();
 
@@ -96,7 +105,7 @@ export default function RadioLibraryPage() {
 
   // Import (modale)
   const [importOpen, setImportOpen] = useState(false);
-  const [uploadMode, setUploadMode] = useState<"files" | "zip">("files");
+  const [uploadMode, setUploadMode] = useState<"files" | "folder" | "zip">("files");
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -175,13 +184,41 @@ export default function RadioLibraryPage() {
   const trackCoverUrl = (id: number) => `${getApiUrl(`/radio/tracks/${id}/cover`)}?v=${coverVersion}`;
 
   // ---- Import ----
+  // Bascule l'attribut `webkitdirectory` sur l'input caché selon le mode : en
+  // mode « dossier », le sélecteur natif choisit un dossier entier (contenu
+  // renvoyé récursivement) plutôt que des fichiers isolés. Posé impérativement
+  // (React ne gère pas proprement cet attribut booléen non standard en JSX).
+  useEffect(() => {
+    const el = fileInputRef.current;
+    if (!el) return;
+    if (uploadMode === "folder") {
+      el.setAttribute("webkitdirectory", "");
+      el.setAttribute("directory", "");
+    } else {
+      el.removeAttribute("webkitdirectory");
+      el.removeAttribute("directory");
+    }
+  }, [uploadMode, importOpen]);
+
   const startFilesUpload = (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
-    const files = Array.from(fileList);
+    let files = Array.from(fileList);
     if (uploadMode === "zip") {
       addUploads([{ kind: "radio_zip", file: files[0], title: files[0].name }]);
     } else {
-      addUploads([{ kind: "radio_files", files, title: files[0].name }]);
+      if (uploadMode === "folder") {
+        const folderName = files[0].webkitRelativePath?.split("/")[0] || t("radioLibrary.folder");
+        files = files.filter((f) => isAudioFile(f.name));
+        if (files.length === 0) {
+          showToast(t("radioLibrary.noAudioInFolder"), "warning");
+          if (fileInputRef.current) fileInputRef.current.value = "";
+          return;
+        }
+        addUploads([{ kind: "radio_files", files, title: `${folderName} (${files.length})` }]);
+      } else {
+        const title = files.length > 1 ? `${files[0].name} (+${files.length - 1})` : files[0].name;
+        addUploads([{ kind: "radio_files", files, title }]);
+      }
     }
     showToast(t("radioLibrary.importStarted"));
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -768,10 +805,11 @@ export default function RadioLibraryPage() {
             <div className={`upload-zone ${dragActive ? "drag-active" : ""}`}
               onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleFileDrop}
               onClick={() => fileInputRef.current?.click()}>
-              <input ref={fileInputRef} type="file" accept={uploadMode === "zip" ? ".zip" : "audio/*"} multiple={uploadMode === "files"}
+              <input ref={fileInputRef} type="file" accept={uploadMode === "zip" ? ".zip" : "audio/*"} multiple={uploadMode !== "zip"}
                 style={{ display: "none" }} onChange={(e) => startFilesUpload(e.target.files)} />
-              <div className="view-toggle" onClick={(e) => e.stopPropagation()} style={{ marginBottom: "8px" }}>
+              <div className="view-toggle" onClick={(e) => e.stopPropagation()} style={{ marginBottom: "8px", flexWrap: "wrap" }}>
                 <button type="button" className={`view-btn ${uploadMode === "files" ? "active" : ""}`} onClick={() => setUploadMode("files")}>{t("radioLibrary.chooseFiles")}</button>
+                <button type="button" className={`view-btn ${uploadMode === "folder" ? "active" : ""}`} onClick={() => setUploadMode("folder")}>{t("radioLibrary.chooseFolder")}</button>
                 <button type="button" className={`view-btn ${uploadMode === "zip" ? "active" : ""}`} onClick={() => setUploadMode("zip")}>{t("radioLibrary.chooseZip")}</button>
               </div>
               <Icon name="cloud_upload" size={48} className="upload-icon" />
