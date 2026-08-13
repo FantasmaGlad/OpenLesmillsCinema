@@ -696,6 +696,12 @@ async def _handle_radio_command(
             logger.warning(f"Commande radio_add_to_queue : morceau {params.get('track_id')} introuvable")
             return
         await manager.add_to_queue(_radio_track_dict(track), client_ts)
+    elif command == "radio_play_next":
+        track = db.query(RadioTrack).filter(RadioTrack.id == params.get("track_id")).first()
+        if not track:
+            logger.warning(f"Commande radio_play_next : morceau {params.get('track_id')} introuvable")
+            return
+        await manager.play_next(_radio_track_dict(track), client_ts)
     elif command == "radio_remove_from_queue":
         await manager.remove_from_order(int(params.get("index", -1)), client_ts)
     elif command == "radio_track_ended":

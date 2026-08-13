@@ -334,14 +334,26 @@ export default function RadioRemotePage() {
                     {track.title}
                     <span style={{ fontWeight: 400, color: "var(--text-muted)" }}> — {track.artist || t("radioLibrary.unknownArtist")}</span>
                   </span>
-                  <button
-                    className="btn btn-secondary"
-                    style={{ height: "28px", padding: "0 10px", fontSize: "0.75rem" }}
-                    onClick={() => sendCommand("radio_add_to_queue", { track_id: track.id })}
-                  >
-                    <Icon name="add" size={14} />
-                    {t("radioRemote.add")}
-                  </button>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ height: "28px", padding: "0 10px", fontSize: "0.75rem" }}
+                      title={t("radioRemote.playNextHint")}
+                      onClick={() => sendCommand("radio_play_next", { track_id: track.id })}
+                    >
+                      <Icon name="playlist_play" size={14} />
+                      {t("radioRemote.playNext")}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ height: "28px", padding: "0 10px", fontSize: "0.75rem" }}
+                      title={t("radioRemote.addToQueueHint")}
+                      onClick={() => sendCommand("radio_add_to_queue", { track_id: track.id })}
+                    >
+                      <Icon name="add" size={14} />
+                      {t("radioRemote.add")}
+                    </button>
+                  </div>
                 </div>
               ))
             )}

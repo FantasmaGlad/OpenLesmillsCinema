@@ -371,15 +371,31 @@ class RadioPlaybackManager:
         await self._emit("radio_set_repeat", client_ts)
 
     async def add_to_queue(self, track: dict, client_ts: float | None = None):
-        """Ajoute une piste « à suivre » juste après la piste courante."""
+        """Ajoute une piste en FIN de file d'attente (réf. correctif "Lire
+        ensuite" — jusqu'ici cette méthode insérait juste après la piste
+        courante, ce qui faisait passer chaque nouvel ajout devant les
+        précédents au lieu de les mettre à la suite). Voir `play_next` pour
+        l'insertion immédiate après la piste en cours."""
+        order = self.state["order"]
+        order.append(track)
+        self.state["order"] = order
+        # Si rien ne jouait, cette piste devient la piste courante.
+        if self.state["index"] is None:
+            self.state["index"] = len(order) - 1
+            self._sync_current()
+        await self._emit("radio_queue_changed", client_ts)
+
+    async def play_next(self, track: dict, client_ts: float | None = None):
+        """« Lire ensuite » : insère une piste juste après la piste courante,
+        devant tout ce qui est déjà en file d'attente (réf. retour
+        utilisateur "Lire ensuite" dans la radio)."""
         order = self.state["order"]
         idx = self.state["index"]
         insert_at = (idx + 1) if idx is not None else len(order)
         order.insert(insert_at, track)
         self.state["order"] = order
-        # Si rien ne jouait, cette piste devient la piste courante.
         if self.state["index"] is None:
-            self.state["index"] = 0
+            self.state["index"] = insert_at
             self._sync_current()
         await self._emit("radio_queue_changed", client_ts)
 
