@@ -645,8 +645,15 @@ async def _handle_radio_command(
             return
         sorted_items = sorted(playlist.items, key=lambda item: item.position)
         tracks = [_radio_track_dict(item.track) for item in sorted_items if item.track]
+        # repeat="playlist" comme le chargement planifié "ambiance 24/7" (réf.
+        # scheduler_manager.py, lot L7, D9) : une radio n'a pas vocation à
+        # s'arrêter en silence en fin de liste — correctif "le mode aléatoire
+        # n'est pas infini" (shuffle et repeat sont deux réglages indépendants
+        # côté RadioPlaybackManager, l'un n'implique pas l'autre). Le DJ garde
+        # la main pour repasser en "off" via le bouton dédié après coup.
         await manager.load_playlist(
-            playlist.id, playlist.name, tracks, shuffle=params.get("shuffle"), client_ts=client_ts
+            playlist.id, playlist.name, tracks, shuffle=params.get("shuffle"), client_ts=client_ts,
+            repeat="playlist",
         )
         log_activity(db, "radio_playlist_started", playlist.name)
     elif command == "radio_shuffle_all":
@@ -656,7 +663,12 @@ async def _handle_radio_command(
         if not tracks:
             logger.info("Commande radio_shuffle_all : bibliothèque radio vide")
             return
-        await manager.load_playlist(None, "Toute la bibliothèque", tracks, shuffle=True, client_ts=client_ts)
+        # repeat="playlist" : même correctif que load_radio_playlist ci-dessus
+        # — "toute la bibliothèque en aléatoire" doit boucler indéfiniment, pas
+        # s'arrêter après un seul passage.
+        await manager.load_playlist(
+            None, "Toute la bibliothèque", tracks, shuffle=True, client_ts=client_ts, repeat="playlist",
+        )
         log_activity(db, "radio_shuffle_all_started", f"{len(tracks)} morceau(x)")
     elif command == "play":
         await manager.play(client_ts)
