@@ -2,6 +2,7 @@ import os
 import logging
 import time
 import logging.handlers
+import tempfile
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -48,6 +49,17 @@ from app.utils.ws_manager import manager as ws_manager
 # (`technical.log`) ; les archives (`technical.log.1` etc.) restent accessibles
 # directement sur le disque pour un diagnostic approfondi si besoin.
 settings.technical_log_path.parent.mkdir(parents=True, exist_ok=True)
+
+# Fichiers temporaires d'upload sur le MÊME disque que les médias (et non /tmp).
+# Sur le Wyse, /tmp est un tmpfs en RAM (~3,8 Go) : un gros upload vidéo/audio le
+# saturait ("OSError: [Errno 28] No space left on device", remonté côté client
+# par Starlette en « There was an error parsing the body ») alors que le disque
+# média a des dizaines de Go libres. Régler `tempfile.tempdir` couvre d'un coup
+# le spool multipart de Starlette (SpooledTemporaryFile) ET les
+# NamedTemporaryFile des routers d'upload (vidéos, cours audio, radio, fonds).
+_upload_tmp_dir = Path(settings.media_dir).parent / "tmp"
+_upload_tmp_dir.mkdir(parents=True, exist_ok=True)
+tempfile.tempdir = str(_upload_tmp_dir)
 
 logging.basicConfig(
     level=logging.INFO,

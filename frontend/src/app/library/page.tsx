@@ -39,12 +39,19 @@ export default function LibraryPage() {
   // Selected video for details drawer
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
 
-  // Drawer Form fields
+  // Drawer Form fields. `drawerProgram` est un libellé LIBRE (plus de presets
+  // RPM/Sprint/The Trip codés en dur) : saisie texte + suggestions (datalist)
+  // des catégories déjà utilisées.
   const [drawerTitle, setDrawerTitle] = useState<string>("");
-  const [drawerProgramPreset, setDrawerProgramPreset] = useState<string>("");
-  const [drawerCustomProgram, setDrawerCustomProgram] = useState<string>("");
+  const [drawerProgram, setDrawerProgram] = useState<string>("");
   const [drawerRelease, setDrawerRelease] = useState<string>("");
   const [isSavingDrawer, setIsSavingDrawer] = useState<boolean>(false);
+
+  // Catégories (programmes) réellement présentes dans la bibliothèque, pour
+  // alimenter les suggestions de saisie, le filtre et le regroupement — plus
+  // aucune liste figée (réf. « retire les catégories hardcodées, laisse créer
+  // sa propre catégorie »).
+  const [programs, setPrograms] = useState<string[]>([]);
 
   // Drag-and-drop zone
   const [dragActive, setDragActive] = useState<boolean>(false);
@@ -157,6 +164,23 @@ export default function LibraryPage() {
       .catch(() => setPlaylists([]));
   }, []);
 
+  const fetchPrograms = () => {
+    fetch(getApiUrl("/videos/programs"), { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: string[]) => setPrograms(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
+  useEffect(fetchPrograms, []);
+
+  // Liste de suggestions = catégories du serveur ∪ celles des vidéos déjà
+  // chargées (pour qu'une catégorie tout juste créée apparaisse sans attendre
+  // un rechargement), triée sans casse.
+  const availablePrograms = React.useMemo(() => {
+    const set = new Set<string>(programs);
+    for (const v of videos) if (v.program) set.add(v.program);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "fr", { sensitivity: "base" }));
+  }, [programs, videos]);
+
   const toggleSelected = (id: number) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -246,20 +270,8 @@ export default function LibraryPage() {
   const handleSelectVideo = (video: Video) => {
     setSelectedVideo(video);
     setDrawerTitle(video.title);
-    
-    // Set program dropdown state
-    const presets = ["RPM", "Sprint", "The Trip"];
-    if (video.program && presets.includes(video.program)) {
-      setDrawerProgramPreset(video.program);
-      setDrawerCustomProgram("");
-    } else if (!video.program) {
-      setDrawerProgramPreset("");
-      setDrawerCustomProgram("");
-    } else {
-      setDrawerProgramPreset("Autre");
-      setDrawerCustomProgram(video.program);
-    }
-    
+    // Catégorie = libellé libre (plus de presets figés).
+    setDrawerProgram(video.program || "");
     setDrawerRelease(video.release || "");
   };
 
@@ -274,7 +286,7 @@ export default function LibraryPage() {
     if (!selectedVideo) return;
 
     setIsSavingDrawer(true);
-    const finalProgram = drawerProgramPreset === "Autre" ? drawerCustomProgram : drawerProgramPreset;
+    const finalProgram = drawerProgram.trim();
 
     try {
       const res = await fetch(getApiUrl(`/videos/${selectedVideo.id}`), {
@@ -298,6 +310,7 @@ export default function LibraryPage() {
           prev.map((v) => (v.id === updatedVideo.id ? updatedVideo : v))
         );
         setSelectedVideo(updatedVideo);
+        fetchPrograms(); // une nouvelle catégorie saisie doit alimenter les suggestions
       } else {
         const errData = await res.json();
         showToast(t("library.saveErrorDetail", { detail: errData.detail || t("library.saveErrorFallback") }), "error");
@@ -383,15 +396,17 @@ export default function LibraryPage() {
     e.target.value = "";
   };
 
-  /** Crée les PendingSpec avec métadonnées pré-remplies par heuristique. */
+  /** Crée les PendingSpec avec métadonnées pré-remplies par heuristique.
+   *  Plus aucune catégorie codée en dur : si le nom de fichier contient une
+   *  catégorie DÉJÀ utilisée (mot-clé), on la propose ; sinon le champ reste
+   *  vide et l'utilisateur saisit/crée librement sa catégorie. */
   const addPendingSpecs = (files: File[]) => {
+    const known = availablePrograms;
     const specs = files.map((file) => {
       const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf(".")) || file.name;
       const lowerName = file.name.toLowerCase();
-      let program = "RPM";
-      if (lowerName.includes("sprint")) program = "Sprint";
-      else if (lowerName.includes("trip")) program = "The Trip";
-      const match = file.name.match(/(?:rpm|sprint|trip|release|rel|r)\s*(\d+)/i);
+      const program = known.find((p) => p && lowerName.includes(p.toLowerCase())) ?? "";
+      const match = file.name.match(/(?:release|rel|r|#|\bv)\s*(\d+)/i);
       const release = match?.[1] ?? "";
       return { key: Math.random().toString(36).slice(2), kind: "video" as const, file, title: nameWithoutExt, program, release };
     });
@@ -420,23 +435,10 @@ export default function LibraryPage() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const getProgramClass = (program: string | null) => {
-    if (!program) return "program-autre";
-    const p = program.toLowerCase();
-    if (p === "rpm") return "program-rpm";
-    if (p === "sprint") return "program-sprint";
-    if (p === "the trip" || p === "the-trip" || p === "trip") return "program-the-trip";
-    return "program-autre";
-  };
-
-  const getProgramBadgeClass = (program: string | null) => {
-    if (!program) return "autre";
-    const p = program.toLowerCase();
-    if (p === "rpm") return "rpm";
-    if (p === "sprint") return "sprint";
-    if (p === "the trip" || p === "the-trip" || p === "trip") return "the-trip";
-    return "autre";
-  };
+  // Catégories libres : plus de couleur par programme (RPM/Sprint/… mappaient
+  // déjà tous vers l'accent du thème en CSS). Une seule classe générique suffit.
+  const getProgramClass = (_program: string | null) => "program-autre";
+  const getProgramBadgeClass = (_program: string | null) => "autre";
 
   const getThumbnailSrc = (video: Video) => {
     if (!video.thumbnail_path) return null;
@@ -447,6 +449,15 @@ export default function LibraryPage() {
 
   return (
     <div className="library-container">
+      {/* Suggestions de catégories partagées (import + drawer) : les catégories
+          déjà utilisées dans la bibliothèque, sans rien imposer — l'utilisateur
+          peut toujours en saisir une nouvelle. */}
+      <datalist id="library-programs">
+        {availablePrograms.map((p) => (
+          <option key={p} value={p} />
+        ))}
+      </datalist>
+
       {/* Dynamic Toast Notifications */}
       {toast && (
         <div className={`toast ${toast.type}`}>
@@ -519,17 +530,15 @@ export default function LibraryPage() {
                     style={{ padding: "6px 10px", fontSize: "0.85rem" }}
                   />
                   <div style={{ display: "flex", gap: "8px" }}>
-                    <select
+                    <input
+                      type="text"
+                      list="library-programs"
                       className="form-control"
-                      value={spec.program ?? "RPM"}
+                      placeholder={t("library.programPlaceholder")}
+                      value={spec.program ?? ""}
                       onChange={(e) => updatePendingSpec(spec.key, { program: e.target.value })}
                       style={{ flex: 1, padding: "6px 8px", fontSize: "0.85rem" }}
-                    >
-                      <option value="RPM">RPM</option>
-                      <option value="Sprint">Sprint</option>
-                      <option value="The Trip">The Trip</option>
-                      <option value="Autre">{t("library.otherProgramOption")}</option>
-                    </select>
+                    />
                     <input
                       type="text"
                       className="form-control"
@@ -610,10 +619,9 @@ export default function LibraryPage() {
             onChange={(e) => setProgramFilter(e.target.value)}
           >
             <option value="">{t("library.allPrograms")}</option>
-            <option value="RPM">RPM</option>
-            <option value="Sprint">Sprint</option>
-            <option value="The Trip">The Trip</option>
-            <option value="Autre">{t("library.otherProgram")}</option>
+            {availablePrograms.map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
           </select>
 
           <input
@@ -667,14 +675,15 @@ export default function LibraryPage() {
           <p style={{ fontSize: "0.85rem", margin: "4px 0 0" }}>{t("library.noVideosHint")}</p>
         </div>
       ) : viewMode === "grid" ? (
-        /* GRID VIEW — groupée par programme (réf. UX3.6) */
+        /* GRID VIEW — regroupée dynamiquement par catégorie présente (réf.
+           UX3.6 + « catégories libres ») : "" = bucket « sans catégorie », placé
+           en dernier ; les autres triées sans casse. */
         <div style={{ display: "flex", flexDirection: "column", gap: "32px" }}>
-          {["RPM", "Sprint", "The Trip", "Autre"]
+          {Array.from(new Set(videos.map((v) => (v.program && v.program.trim() ? v.program : ""))))
+            .sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b, "fr", { sensitivity: "base" })))
             .map((program) => ({
               program,
-              items: videos.filter((v) =>
-                program === "Autre" ? !v.program || !["RPM", "Sprint", "The Trip"].includes(v.program) : v.program === program
-              ),
+              items: videos.filter((v) => (v.program && v.program.trim() ? v.program : "") === program),
             }))
             .filter((g) => g.items.length > 0)
             .map((group) => (
@@ -697,7 +706,7 @@ export default function LibraryPage() {
                       style={{ width: "16px", height: "16px", cursor: "pointer" }}
                     />
                     <span>
-                      {group.program === "Autre" ? t("library.otherProgram") : group.program}{" "}
+                      {group.program === "" ? t("library.noProgram") : group.program}{" "}
                       <span style={{ color: "var(--text-dim)" }}>({group.items.length})</span>
                     </span>
                   </label>
@@ -735,7 +744,7 @@ export default function LibraryPage() {
                           </h4>
                           <div className="card-meta-row">
                             <span className={`program-badge ${getProgramBadgeClass(video.program)}`}>
-                              {video.program || t("library.otherProgram")}
+                              {video.program || t("library.noProgram")}
                             </span>
                             {video.release && (
                               <span className="release-badge">{t("library.releaseBadge", { release: video.release })}</span>
@@ -801,7 +810,7 @@ export default function LibraryPage() {
                     </td>
                     <td>
                       <span className={`program-badge ${getProgramBadgeClass(video.program)}`}>
-                        {video.program || t("library.otherProgram")}
+                        {video.program || t("library.noProgram")}
                       </span>
                     </td>
                     <td>{video.release ? t("library.releaseFull", { release: video.release }) : "-"}</td>
@@ -863,17 +872,14 @@ export default function LibraryPage() {
                 <div style={{ display: "flex", gap: "12px" }}>
                   <div className="form-group" style={{ flex: 1 }}>
                     <label className="form-label">{t("library.programLabel")}</label>
-                    <select
+                    <input
+                      type="text"
+                      list="library-programs"
                       className="form-control"
-                      value={drawerProgramPreset}
-                      onChange={(e) => setDrawerProgramPreset(e.target.value)}
-                    >
-                      <option value="">{t("library.noneOption")}</option>
-                      <option value="RPM">RPM</option>
-                      <option value="Sprint">Sprint</option>
-                      <option value="The Trip">The Trip</option>
-                      <option value="Autre">{t("library.otherProgramOption")}</option>
-                    </select>
+                      value={drawerProgram}
+                      onChange={(e) => setDrawerProgram(e.target.value)}
+                      placeholder={t("library.programPlaceholder")}
+                    />
                   </div>
 
                   <div className="form-group" style={{ flex: 1 }}>
@@ -887,20 +893,6 @@ export default function LibraryPage() {
                     />
                   </div>
                 </div>
-
-                {drawerProgramPreset === "Autre" && (
-                  <div className="form-group">
-                    <label className="form-label">{t("library.customProgramLabel")}</label>
-                    <input
-                      type="text"
-                      placeholder={t("library.customProgramPlaceholder")}
-                      className="form-control"
-                      value={drawerCustomProgram}
-                      onChange={(e) => setDrawerCustomProgram(e.target.value)}
-                      required
-                    />
-                  </div>
-                )}
 
                 {/* Readonly info */}
                 <div style={{ background: "var(--bg-surface-hover)", padding: "12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", display: "flex", flexDirection: "column", gap: "8px", fontSize: "0.85rem", marginTop: "8px" }}>

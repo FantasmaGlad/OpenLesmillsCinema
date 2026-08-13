@@ -76,6 +76,8 @@ La configuration est chargée selon l'ordre de priorité suivant :
 | `playback.wait_time_between_courses` | `10` | Délai d'inter-cours (s) |
 | `playback.volume_default` | `100` | Volume par défaut (0-100) |
 
+> **Fichiers temporaires d'upload** : le backend force `tempfile.tempdir` sur `data/tmp` (à côté des médias) au démarrage, au lieu de `/tmp`. Sur le Wyse, `/tmp` est un tmpfs en RAM (~3,8 Go) qu'un gros import vidéo/audio saturait (`OSError: No space left on device`, remonté côté client en « There was an error parsing the body ») alors que le disque média a des dizaines de Go libres.
+
 ---
 
 ## 2. Architecture générale
@@ -136,6 +138,8 @@ Le système pilote deux canaux de diffusion vidéo **strictement indépendants**
 1. **Canal Câblé (`channel=cable`)** : Canal d'affichage principal relié à la sortie vidéo physique du mini PC (écran salle / kiosque).
 2. **Canal Réseau (`channel=network`)** : Canal secondaire destiné à la diffusion réseau ou aux écrans auxiliaires.
 3. **Canal Radio (`channel=radio`)** : 3ᵉ canal, totalement indépendant des deux premiers (aucune interaction) — diffusion musicale continue sur un poste dédié. Géré par un gestionnaire d'état séparé (`radio_manager.py`), pas le `playback_manager` ci-dessous.
+
+Chaque écran affiche `/kiosk` ou `/cinema` selon la sortie choisie par l'admin (`/api/settings/display-output`, ex. câble → `cinema`, réseau → `kiosk`). L'écran câblé (`127.0.0.1`, détecté par `isWiredDisplay()`) suit toujours sa sortie stockée. **Bibliothèque vide** : `/cinema` affiche un écran d'attente plein écran (grand logo + heure + « Aucun cours disponible ») au lieu d'un écran noir ; `/kiosk` a son propre écran d'attente (horloge + prochain cours). Les **catégories de cours** sont des libellés **libres** (plus de RPM/Sprint/The Trip figés) : saisie avec suggestions des catégories déjà utilisées, filtre et regroupement dynamiques.
 
 ### Reprise après interruption (Resilience Rule)
 
@@ -214,7 +218,7 @@ Pas de service dédié pour le canal Radio (arbitrage A5, cf. §5) : `/radio` s'
 
 | Domaine | Préfixe | Description |
 |---|---|---|
-| **Vidéos** | `/api/videos` | Import, liste, détail, normalisation et suppression |
+| **Vidéos** | `/api/videos` | Import, liste, détail, normalisation, suppression et catégories distinctes (`/videos/programs`) |
 | **Playlists Vidéo** | `/api/playlists` | Gestion des playlists vidéo (CRUD, relecture) |
 | **Fonds Animés** | `/api/backgrounds` | Gestion de la bibliothèque de boucles visuelles |
 | **Audio Coach** | `/api/audio` | Import de cours audio (MP3/ZIP), gestion des pistes |

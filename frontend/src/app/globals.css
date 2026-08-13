@@ -3615,6 +3615,44 @@ h1, h2, h3, h4, h5, h6 {
   scrollbar-width: thin;
 }
 
+/* Écran d'attente « bibliothèque vide » (réf. « le cinéma câblé n'affiche rien
+   quand il n'y a pas de cours ») : recouvre la vitrine, fond opaque du thème,
+   grand logo (image noire inversée par --logo-filter selon le thème), heure et
+   message centrés. z-index au-dessus des .cinema-layer. */
+.cinema-empty-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 5vh 5vw;
+  background: var(--bg-main);
+  color: var(--text-main);
+  text-align: center;
+}
+
+.cinema-empty-logo {
+  height: min(28vh, 36vw);
+  width: auto;
+}
+
+.cinema-empty-clock {
+  font-size: 5rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.cinema-empty-message {
+  font-size: 1.2rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
 /* Entrée en scène des sections et cartes (delay échelonné via style inline) */
 @keyframes cinema-fade-up {
   from {

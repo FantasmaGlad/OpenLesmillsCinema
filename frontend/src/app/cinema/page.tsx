@@ -37,6 +37,10 @@ function formatDurationMin(seconds: number | null) {
   return `${Math.round(seconds / 60)} min`;
 }
 
+function formatClock(date: Date) {
+  return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+}
+
 function thumbnailUrl(video: CinemaVideo): string | null {
   if (!video.thumbnail_path) return null;
   const filename = video.thumbnail_path.split("/").pop();
@@ -243,6 +247,16 @@ export default function CinemaPage() {
   const [videos, setVideos] = useState<CinemaVideo[]>([]);
   const [phase, setPhase] = useState<Phase>("grid");
   const [selected, setSelected] = useState<CinemaVideo | null>(null);
+
+  // Horloge de l'écran d'attente « bibliothèque vide » (voir plus bas) :
+  // quand aucun cours n'est disponible, la vitrine n'a ni héros ni logo et se
+  // réduisait à un mince texte sur fond noir — perçu comme un écran éteint sur
+  // la TV. On affiche à la place un vrai écran d'attente (grand logo + heure).
+  const [now, setNow] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
   // Vidéo d'animation de lancement, rejouée du début à chaque sélection.
   // introReady : voir kiosk/page.tsx (même correctif, réf. retour utilisateur
   // "l'animation ne se lance pas sur le réseau") — sur une connexion lente,
@@ -551,6 +565,18 @@ export default function CinemaPage() {
 
   return (
     <div className="cinema-root" onMouseMove={isPlayingLayer ? wakeControls : undefined}>
+      {/* Écran d'attente « bibliothèque vide » : recouvre la vitrine tant
+          qu'aucun cours n'est importé (sinon la TV n'affiche qu'un mince texte
+          sur fond noir — « rien » côté salle). Grand logo + heure + message,
+          dans l'esprit de l'écran d'attente du poste radio/kiosk. */}
+      {videos.length === 0 && (
+        <div className="cinema-empty-screen">
+          <AppLogo className="cinema-empty-logo" />
+          <span className="cinema-empty-clock">{formatClock(now)}</span>
+          <span className="cinema-empty-message">{t("cinema.empty")}</span>
+        </div>
+      )}
+
       {/* Vitrine de sélection : héros + rangées par programme + grille complète */}
       <div className={`cinema-layer cinema-grid-layer ${showGrid ? "visible" : ""}`}>
         {featured && (

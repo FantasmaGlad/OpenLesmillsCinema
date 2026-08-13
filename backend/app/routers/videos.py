@@ -169,6 +169,25 @@ def list_videos(
     return query.all()
 
 
+@router.get("/programs", response_model=List[str])
+def list_programs(db: Session = Depends(get_db)):
+    """Catégories (programmes) réellement présentes dans la bibliothèque, triées.
+
+    Remplace les catégories jadis codées en dur (RPM/Sprint/The Trip) : le champ
+    `program` est un libellé LIBRE saisi par l'utilisateur ; cet endpoint alimente
+    la liste de suggestions (datalist) et le regroupement dynamique côté UI.
+    Défini AVANT `/{video_id}` pour que « programs » ne soit pas interprété comme
+    un identifiant de vidéo.
+    """
+    rows = (
+        db.query(Video.program)
+        .filter(Video.program.isnot(None), Video.program != "")
+        .distinct()
+        .all()
+    )
+    return sorted({r[0] for r in rows}, key=str.casefold)
+
+
 @router.get("/{video_id}", response_model=VideoResponse)
 def get_video(video_id: int, db: Session = Depends(get_db)):
     """
