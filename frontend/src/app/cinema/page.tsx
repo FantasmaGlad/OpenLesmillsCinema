@@ -320,11 +320,31 @@ export default function CinemaPage() {
   // Son de survol des cartes de cours (réf. mission UI/UX).
   const playHoverSound = useHoverSound("/sounds/survole.mp3");
 
+  // Rafraîchissement LIVE de la vitrine : la page cinéma est un écran passif
+  // qui ne se recharge jamais ; sans ce sondage, un cours importé depuis un
+  // autre poste n'apparaissait qu'après un rechargement manuel (réf. « les
+  // cours ne se mettent pas à jour en direct »). On ne remplace l'état que si
+  // la liste a réellement changé, pour ne pas re-rendre la vitrine (ni couper
+  // un survol/scroll) à chaque tick.
   useEffect(() => {
-    fetch(getApiUrl("/videos?sort_by=title&order=asc"), { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : []))
-      .then(setVideos)
-      .catch(() => setVideos([]));
+    let cancelled = false;
+    const load = () => {
+      fetch(getApiUrl("/videos?sort_by=title&order=asc"), { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data: CinemaVideo[]) => {
+          if (cancelled || !Array.isArray(data)) return;
+          setVideos((prev) =>
+            prev.length === data.length && prev.every((v, i) => v.id === data[i]?.id) ? prev : data,
+          );
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   const clearUpNextTask = () => {

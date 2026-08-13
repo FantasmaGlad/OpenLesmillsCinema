@@ -733,6 +733,11 @@ export default function KioskPage() {
           className="kiosk-video"
           onTimeUpdate={handleTimeUpdate}
           onEnded={() => sendCommand("video_ended")}
+          // preload="auto" : demande au navigateur de mettre en tampon en
+          // avance plutôt qu'au tout dernier moment — atténue les saccades sur
+          // l'écran RÉSEAU (lecture par-dessus le LAN/Wi-Fi, contrairement au
+          // câblé servi en loopback 127.0.0.1). Le <video> du cinéma l'a déjà.
+          preload="auto"
           playsInline
         />
       </div>
