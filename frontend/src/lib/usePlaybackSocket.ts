@@ -149,6 +149,39 @@ function getApiUrl(path: string): string {
 // réel du serveur même quand aucun évènement WebSocket n'est perdu.
 const RESYNC_INTERVAL_MS = 15000;
 
+// Renouvellement du bail primaire (réf. correctif "freeze vidéo réseau") :
+// doit rester nettement sous PRIMARY_LEASE_TTL_SECONDS (12s, backend
+// ws_manager.py) pour ne jamais laisser le bail expirer pendant qu'un kiosk
+// est toujours bien connecté.
+const KIOSK_IDENTIFY_INTERVAL_MS = 5000;
+const KIOSK_CLIENT_ID_STORAGE_KEY = "olc-kiosk-client-id";
+
+/**
+ * Identifiant stable de CET appareil/onglet kiosk, persistant across
+ * reconnexions WebSocket (contrairement à l'objet WebSocket lui-même) — la
+ * clé du bail primaire Redis côté backend (cf. ws_manager.py,
+ * PRIMARY_LEASE_KEY_PREFIX). Sans lui, une reconnexion qui atterrit sur un
+ * autre worker uvicorn ne serait pas reconnue comme le même kiosk.
+ */
+function getOrCreateKioskClientId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const existing = window.localStorage.getItem(KIOSK_CLIENT_ID_STORAGE_KEY);
+    if (existing) return existing;
+    const created =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `kiosk-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    window.localStorage.setItem(KIOSK_CLIENT_ID_STORAGE_KEY, created);
+    return created;
+  } catch {
+    // localStorage indisponible (navigation privée stricte, etc.) : repli sur
+    // un identifiant de session, perdu à la prochaine reconnexion — dégrade
+    // gracieusement vers l'ancien comportement (pas de reprise cross-worker).
+    return `kiosk-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
 /**
  * Connexion WebSocket partagée à l'état de lecture (Lot 3). Utilisée à la
  * fois par l'écran kiosk (qui pilote un <video> réel) et par les
@@ -225,10 +258,20 @@ export function usePlaybackSocket(
     let retryDelay = 1000;
     const MAX_RETRY_DELAY = 30000;
 
+    let identifyInterval: ReturnType<typeof setInterval> | undefined;
+
     const connect = () => {
       if (cancelled) return;
       const ws = new WebSocket(getWsUrl());
       wsRef.current = ws;
+
+      const sendIdentify = () => {
+        if (wsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({
+          command: "identify",
+          params: { role: "kiosk", channel, client_id: getOrCreateKioskClientId() },
+        }));
+      };
 
       ws.onopen = () => {
         // Garde-fou "socket fantôme" (correctif "le bouton Stop ne marche
@@ -243,9 +286,15 @@ export function usePlaybackSocket(
         retryDelay = 1000;
         // Identification du rôle kiosk (réf. correctif P4) : envoyée dès
         // l'ouverture de la connexion pour que le backend puisse assigner
-        // le rôle primaire/miroir avant tout report_position.
+        // le rôle primaire/miroir avant tout report_position, PUIS répétée
+        // périodiquement (réf. correctif "freeze vidéo réseau") pour
+        // renouveler le bail primaire Redis avant son expiration — sans ça,
+        // un kiosk pourtant toujours connecté finirait par perdre son statut
+        // primaire au bout de PRIMARY_LEASE_TTL_SECONDS.
         if (role === "kiosk") {
-          ws.send(JSON.stringify({ command: "identify", params: { role: "kiosk", channel } }));
+          sendIdentify();
+          clearInterval(identifyInterval);
+          identifyInterval = setInterval(sendIdentify, KIOSK_IDENTIFY_INTERVAL_MS);
         }
         // Rejoue les commandes mises en file pendant la coupure (voir
         // sendCommand) — uniquement les fraîches, dans l'ordre d'émission.
@@ -271,8 +320,12 @@ export function usePlaybackSocket(
             return;
           }
           if (parsed.event === "promoted_primary") {
-            // Le kiosk primaire s'est déconnecté, nous sommes promus.
-            setIsPrimary(true);
+            // Le kiosk primaire du canal s'est déconnecté et a libéré son
+            // bail — on retente immédiatement notre identify (au lieu
+            // d'attendre le prochain renouvellement périodique) pour
+            // réclamer le rôle sans délai ; le backend confirmera via
+            // "kiosk_role".
+            sendIdentify();
             return;
           }
           if (parsed.event === "display_output") {
@@ -341,6 +394,7 @@ export function usePlaybackSocket(
         // programmer une seconde reconnexion concurrente à celle éventuelle
         // de la connexion réellement active.
         if (wsRef.current !== ws) return;
+        clearInterval(identifyInterval);
         setConnected(false);
         setIsPrimary(false);
         wsRef.current = null;
@@ -360,6 +414,7 @@ export function usePlaybackSocket(
     return () => {
       cancelled = true;
       clearTimeout(reconnectTimer);
+      clearInterval(identifyInterval);
       if (cinemaLockedTimerRef.current) clearTimeout(cinemaLockedTimerRef.current);
       wsRef.current?.close();
     };

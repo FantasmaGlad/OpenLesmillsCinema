@@ -234,6 +234,7 @@ async def playback_ws(websocket: WebSocket, db: Session = Depends(get_db)):
     await ws_manager.connect(websocket)
     is_kiosk = False
     kiosk_channel = DEFAULT_CHANNEL
+    kiosk_client_id = ""
     try:
         # Envoi immédiat de l'état courant DES DEUX CANAUX au nouveau client
         # (kiosk ou télécommande) : chaque message porte son champ channel,
@@ -259,20 +260,29 @@ async def playback_ws(websocket: WebSocket, db: Session = Depends(get_db)):
             message = await websocket.receive_json()
             # Identification du rôle du client (réf. correctif P4).
             # Le kiosk envoie {"command": "identify", "params": {"role":
-            # "kiosk", "channel": "cable"|"network"|"radio"}} dès l'ouverture
-            # de la connexion. On enregistre son rôle SUR SON CANAL et on lui
-            # retourne son statut primaire/miroir via un message dédié.
+            # "kiosk", "channel": "cable"|"network"|"radio", "client_id":
+            # "..."}} dès l'ouverture de la connexion, PUIS périodiquement en
+            # renouvellement (réf. correctif "freeze vidéo réseau" — le bail
+            # primaire Redis expire s'il n'est pas rafraîchi). On enregistre
+            # son rôle SUR SON CANAL et on lui retourne son statut
+            # primaire/miroir via un message dédié à chaque appel.
             if message.get("command") == "identify":
                 params = message.get("params") or {}
                 role = params.get("role")
-                if role == "kiosk" and not is_kiosk:
-                    is_kiosk = True
-                    requested_channel = params.get("channel")
-                    # Le poste /radio (lot L4) est le lecteur primaire du 3e
-                    # canal, hors CHANNELS (cable/network) : _resolve_channel
-                    # le ferait retomber sur "cable" à tort.
-                    kiosk_channel = "radio" if requested_channel == "radio" else _resolve_channel(requested_channel)
-                    is_primary = ws_manager.register_kiosk(websocket, kiosk_channel)
+                if role == "kiosk":
+                    if not is_kiosk:
+                        is_kiosk = True
+                        requested_channel = params.get("channel")
+                        # Le poste /radio (lot L4) est le lecteur primaire du 3e
+                        # canal, hors CHANNELS (cable/network) : _resolve_channel
+                        # le ferait retomber sur "cable" à tort.
+                        kiosk_channel = "radio" if requested_channel == "radio" else _resolve_channel(requested_channel)
+                        # Identifiant stable persistant côté client (localStorage) —
+                        # repli sur l'identité de CETTE connexion si absent (vieux
+                        # bundle frontend en cache), auquel cas le bail se comporte
+                        # comme avant (pas de reprise cross-worker, sans régression).
+                        kiosk_client_id = params.get("client_id") or f"conn-{id(websocket)}"
+                    is_primary = await ws_manager.register_kiosk(websocket, kiosk_channel, kiosk_client_id)
                     await websocket.send_json({
                         "event": "kiosk_role",
                         "is_primary": is_primary,

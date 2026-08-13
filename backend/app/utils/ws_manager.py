@@ -54,6 +54,22 @@ def _apply_remote_message(data: dict) -> None:
 PING_INTERVAL_SECONDS = 30.0
 PONG_TIMEOUT_SECONDS = 20.0
 
+# Bail Redis du rôle primaire par canal (correctif "freeze vidéo en sortie
+# réseau" — réf. retour utilisateur 2026-08-13) : avec plusieurs workers
+# uvicorn, `_kiosk_connections` (liste locale ci-dessous) ne voit QUE les
+# connexions de CE worker. Un kiosk réseau qui perd puis reprend sa connexion
+# Wi-Fi peut très bien se reconnecter sur un AUTRE worker : son ancienne
+# entrée (morte mais pas encore expirée côté ping/pong) reste "primaire" sur
+# son worker d'origine, tandis que la reconnexion légitime atterrit en
+# 2e position (donc miroir) sur son nouveau worker — le client réel se fait
+# alors recaler de force (pause/reprise) à chaque resynchronisation tant que
+# l'entrée fantôme n'a pas expiré. Un bail Redis keyé par un identifiant
+# stable côté client (persistant across reconnects, cf. `client_id`) règle ça
+# : "suis-je primaire" devient une question posée à Redis (vu par tous les
+# workers), plus un ordre d'arrivée local à un seul processus.
+PRIMARY_LEASE_TTL_SECONDS = 12
+PRIMARY_LEASE_KEY_PREFIX = "kiosk:primary"
+
 
 class ConnectionManager:
     """Diffuse les changements d'état de lecture à tous les clients connectés
@@ -87,6 +103,13 @@ class ConnectionManager:
         self._kiosk_connections: dict[str, list[WebSocket]] = {"cable": [], "network": [], "radio": []}
         # Canal déclaré par chaque kiosk à son identify (pour le retrait).
         self._kiosk_channel: dict[WebSocket, str] = {}
+        # Identifiant stable côté client (persistant across reconnects) et
+        # dernier statut primaire/miroir connu (issu du bail Redis, cf.
+        # PRIMARY_LEASE_KEY_PREFIX) — `is_primary_kiosk` lit ce cache local
+        # pour rester synchrone et rapide (pas d'aller-retour Redis à chaque
+        # report_position, qui peut arriver plusieurs fois par seconde).
+        self._kiosk_client_id: dict[WebSocket, str] = {}
+        self._kiosk_primary_status: dict[WebSocket, bool] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -111,16 +134,57 @@ class ConnectionManager:
     # Gestion du rôle primaire / miroir des kiosks
     # ------------------------------------------------------------------
 
-    def register_kiosk(self, websocket: WebSocket, channel: str = "cable") -> bool:
-        """Enregistre un kiosk sur SON canal. Retourne True si ce kiosk
-        devient le primaire du canal."""
+    async def _claim_primary_lease(self, channel: str, client_id: str) -> bool:
+        """Tente d'acquérir/renouveler le bail Redis du rôle primaire de
+        `channel` pour `client_id`. Vu par tous les workers, contrairement à
+        `_kiosk_connections` (cf. commentaire de PRIMARY_LEASE_TTL_SECONDS).
+
+        Lecture puis écriture non-atomique (pas de script Lua) : même
+        compromis que `acquire_tick_lock`, volontairement simple pour un
+        enjeu faible (au pire un très bref double-primaire le temps d'une
+        reconnexion, jamais pire que le comportement actuel). Si Redis est
+        injoignable, on laisse passer en primaire plutôt que de bloquer
+        totalement l'écran kiosk.
+        """
+        key = f"{PRIMARY_LEASE_KEY_PREFIX}:{channel}"
+        try:
+            redis_client = get_redis()
+            current = await redis_client.get(key)
+            if current is None or current == client_id:
+                await redis_client.set(key, client_id, ex=PRIMARY_LEASE_TTL_SECONDS)
+                return True
+            return False
+        except Exception as e:
+            logger.warning(f"Bail primaire Redis indisponible pour '{channel}', primaire par défaut : {e}")
+            return True
+
+    async def _release_primary_lease(self, channel: str, client_id: str) -> None:
+        """Libère le bail primaire de `channel` s'il appartient encore à
+        `client_id` — permet une reprise immédiate par un miroir au lieu
+        d'attendre l'expiration du TTL sur une déconnexion propre."""
+        key = f"{PRIMARY_LEASE_KEY_PREFIX}:{channel}"
+        try:
+            redis_client = get_redis()
+            if await redis_client.get(key) == client_id:
+                await redis_client.delete(key)
+        except Exception:
+            pass
+
+    async def register_kiosk(self, websocket: WebSocket, channel: str = "cable", client_id: str = "") -> bool:
+        """Enregistre un kiosk sur SON canal et (ré)évalue son statut
+        primaire/miroir via le bail Redis (cf. PRIMARY_LEASE_KEY_PREFIX).
+        Appelé à l'identify initial ET périodiquement en renouvellement
+        (réf. correctif "freeze vidéo réseau") — retourne True si ce kiosk
+        est/devient le primaire du canal."""
         if channel not in self._kiosk_connections:
             channel = "cable"
         kiosks = self._kiosk_connections[channel]
         if websocket not in kiosks:
             kiosks.append(websocket)
         self._kiosk_channel[websocket] = channel
-        is_primary = kiosks[0] == websocket
+        self._kiosk_client_id[websocket] = client_id
+        is_primary = await self._claim_primary_lease(channel, client_id)
+        self._kiosk_primary_status[websocket] = is_primary
         logger.info(
             f"Kiosk enregistré sur le canal '{channel}' — rôle : {'primaire' if is_primary else 'miroir'} "
             f"({len(kiosks)} kiosk(s) sur ce canal)"
@@ -128,36 +192,48 @@ class ConnectionManager:
         return is_primary
 
     def is_primary_kiosk(self, websocket: WebSocket) -> bool:
-        """Retourne True si ce websocket est le kiosk primaire de son canal."""
-        channel = self._kiosk_channel.get(websocket)
-        if channel is None:
-            return False
-        kiosks = self._kiosk_connections[channel]
-        return bool(kiosks) and kiosks[0] == websocket
+        """Retourne True si ce websocket est le kiosk primaire de son canal
+        (dernier statut connu du bail Redis, mis à jour à chaque identify)."""
+        return self._kiosk_primary_status.get(websocket, False)
 
     def kiosk_channel(self, websocket: WebSocket) -> str | None:
         """Canal déclaré par ce kiosk à son identify (None si pas un kiosk)."""
         return self._kiosk_channel.get(websocket)
 
     async def _unregister_kiosk(self, websocket: WebSocket) -> None:
-        """Retire un kiosk de la liste de son canal. Si c'était le primaire
-        du canal et qu'il reste d'autres kiosks dessus, le prochain en ligne
-        est promu primaire via un message WebSocket dédié."""
+        """Retire un kiosk de la liste de son canal et libère son bail
+        primaire (le cas échéant) pour une reprise immédiate. Si un autre
+        kiosk local est présent sur le canal, on le pousse à retenter sa
+        chance tout de suite plutôt que d'attendre son prochain
+        renouvellement périodique."""
         channel = self._kiosk_channel.pop(websocket, None)
+        was_primary = self._kiosk_primary_status.pop(websocket, False)
+        client_id = self._kiosk_client_id.pop(websocket, None)
         if channel is None:
             return
         kiosks = self._kiosk_connections[channel]
-        if websocket not in kiosks:
-            return
-        was_primary = kiosks[0] == websocket
-        kiosks.remove(websocket)
-        if was_primary and kiosks:
-            new_primary = kiosks[0]
-            logger.info(f"Kiosk primaire du canal '{channel}' déconnecté — promotion du kiosk suivant")
+        if websocket in kiosks:
+            kiosks.remove(websocket)
+        # Ne libère le bail que si AUCUNE autre connexion locale ne porte
+        # encore ce même (canal, client_id) : sinon une déconnexion tardive
+        # de l'ANCIENNE socket d'un appareil (ping/pong met jusqu'à 50s à la
+        # détecter morte) supprimerait le bail déjà légitimement repris par
+        # SA PROPRE reconnexion plus rapide — coupant à tort le vrai
+        # primaire pendant quelques secondes, exactement le genre de blip
+        # que ce correctif cherche à éliminer.
+        still_present = any(
+            self._kiosk_channel.get(other) == channel and self._kiosk_client_id.get(other) == client_id
+            for other in kiosks
+        )
+        if was_primary and client_id and not still_present:
+            await self._release_primary_lease(channel, client_id)
+        if kiosks:
+            logger.info(f"Kiosk du canal '{channel}' déconnecté — invitation du suivant à retenter le rôle primaire")
+            next_kiosk = kiosks[0]
             try:
-                await new_primary.send_json({"event": "promoted_primary"})
+                await next_kiosk.send_json({"event": "promoted_primary"})
             except Exception:
-                # Le nouveau primaire s'est peut-être lui aussi déconnecté entre-temps.
+                # Ce kiosk s'est peut-être lui aussi déconnecté entre-temps.
                 pass
 
     async def broadcast(self, message: dict):
