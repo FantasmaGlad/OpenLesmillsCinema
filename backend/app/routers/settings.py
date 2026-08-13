@@ -36,7 +36,7 @@ _DEFAULTS = {"theme": "les-mills-sombre", "language": "fr"}
 # "les-mills-sombre" est la clé interne historique du thème "Sombre" (réf.
 # mission thèmes cinéma) — inchangée pour ne rien casser sur les
 # installations existantes, seul son libellé affiché change côté frontend.
-_VALID_THEMES = {"les-mills-sombre", "clair", "lune", "menthe", "automne", "hiver", "chili", "ciel", "orchidee", "taupe", "charbon"}
+_VALID_THEMES = {"les-mills-sombre", "clair", "lune", "menthe", "automne", "hiver", "chili", "ciel", "orchidee", "taupe", "charbon", "beige", "lavande"}
 
 # Sortie affichée par CANAL de diffusion (réf. mission "canaux de diffusion
 # précis") : "câblé" (l'écran physiquement connecté au Wyse, en 127.0.0.1) et
