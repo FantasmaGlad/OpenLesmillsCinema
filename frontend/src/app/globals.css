@@ -4506,6 +4506,20 @@ h1, h2, h3, h4, h5, h6 {
 .settings-hint { font-size: 0.78rem; color: var(--text-dim); margin: 6px 0 0; line-height: 1.4; }
 .settings-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
 
+/* Corrige le désalignement des champs (réf. retour utilisateur "les boutons
+   ne sont pas alignés") : la grille étire chaque .form-group à la hauteur de
+   la plus grande cellule de la ligne, mais les libellés ont des longueurs
+   très différentes ("Volume par défaut (%)" vs "Minuterie par défaut entre
+   pistes en mode coach « auto + minuterie » (secondes)", qui peut passer sur
+   3 lignes selon la largeur) — sans ancrage, les champs ne démarrent pas
+   tous à la même hauteur. `margin-top: auto` pousse chaque input en bas de
+   son .form-group (déjà étiré à la hauteur de la ligne par la grille) quel
+   que soit le nombre de lignes du libellé au-dessus — s'adapte à n'importe
+   quelle largeur, pas de hauteur fixe à deviner. */
+.settings-fields .form-group .form-control {
+  margin-top: auto;
+}
+
 /* Statut système (Watcher / Écran) */
 .settings-status-grid { display: flex; flex-direction: column; gap: 10px; }
 .settings-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
