@@ -154,9 +154,10 @@ def import_radio_announcement(file_path: str, description: str, db) -> RadioAnno
     meta = extract_radio_metadata(str(src))
 
     Path(settings.radio_announcements_dir).mkdir(parents=True, exist_ok=True)
-    # Normalisation loudness systématique (réf. correctif « rappel quasi
-    # inaudible ») : on ré-encode toujours en AAC/.m4a avec loudnorm, pour que
-    # le rappel s'entende à une puissance comparable à la musique masterisée.
+    # Normalisation loudness systématique (réf. correctif « voix trop faible
+    # vs musique ») : on ré-encode toujours en AAC/.m4a avec loudnorm (2 passes,
+    # cible -10 LUFS), pour que le rappel s'entende au moins aussi fort que la
+    # musique masterisée.
     dest_path = Path(settings.radio_announcements_dir) / f"announcement_{file_id}.m4a"
     normalize_announcement_loudness(str(src), str(dest_path))
 

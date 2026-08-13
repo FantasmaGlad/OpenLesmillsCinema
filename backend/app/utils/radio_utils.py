@@ -173,19 +173,62 @@ def transcode_to_web(src_path: str, dest_path: str) -> None:
         raise RuntimeError(f"Transcodage échoué pour {src_path}: {res.stderr[-500:]}")
 
 
-def normalize_announcement_loudness(src_path: str, dest_path: str, target_lufs: float = -14.0) -> None:
-    """Normalise le loudness d'un rappel (filtre EBU R128 `loudnorm`) vers une
-    cible proche de la musique masterisée, puis ré-encode en AAC/.m4a.
-
-    Réf. correctif user « le rappel ne se joue pas à la même puissance, quasi
-    inaudible » : une voix brute a un loudness (LUFS) bien plus faible qu'une
-    musique masterisée à gain numérique égal — au même gain de lecture, elle
-    s'entend donc beaucoup moins. On aligne le loudness à l'import (comme le
-    fait une vraie radio pour ses voix-off), TP=-1.5 dBTP pour garder une marge
-    anti-saturation."""
+def _measure_loudnorm(src_path: str, target_lufs: float) -> dict | None:
+    """1ʳᵉ passe `loudnorm` (analyse seule, sortie nulle) : mesure le loudness
+    réel de la source et renvoie le bloc JSON (input_i/tp/lra/thresh +
+    target_offset) à réinjecter en 2ᵉ passe. Renvoie None si l'analyse échoue
+    ou si le JSON est introuvable (on retombe alors sur une passe simple)."""
     cmd = [
-        "ffmpeg", "-y", "-i", src_path,
-        "-af", f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11",
+        "ffmpeg", "-y", "-i", src_path, "-vn",
+        "-af", f"loudnorm=I={target_lufs}:TP=-1.0:LRA=11:print_format=json",
+        "-f", "null", "-",
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        return None
+    # ffmpeg imprime le bloc JSON en fin de stderr : on prend le dernier objet.
+    matches = re.findall(r"\{[^{}]*\}", res.stderr, re.DOTALL)
+    if not matches:
+        return None
+    try:
+        return json.loads(matches[-1])
+    except json.JSONDecodeError:
+        return None
+
+
+def normalize_announcement_loudness(src_path: str, dest_path: str, target_lufs: float = -10.0) -> None:
+    """Normalise le loudness d'un rappel (filtre EBU R128 `loudnorm`) au niveau
+    d'une musique commerciale, puis ré-encode en AAC/.m4a.
+
+    Réf. correctif user « la voix des rappels est très faible vs la musique ;
+    elle doit être au minimum aussi forte » : une voix brute a un loudness
+    (LUFS) bien plus faible qu'une musique masterisée, et les pistes musicales
+    ne sont PAS normalisées à l'import (souvent -9 à -11 LUFS). On aligne donc
+    la voix sur ce niveau commercial (cible -10 LUFS ≈ la plupart des masters),
+    pour qu'elle passe au-dessus de la musique.
+
+    On procède en DEUX passes : une passe simple de `loudnorm` sous-évalue le
+    gain sur une voix courte/silencieuse (le filtre « apprend » encore le
+    niveau sur les premières secondes) — d'où l'ancien rappel resté trop bas
+    même à -14 LUFS. La 1ʳᵉ passe mesure la source, la 2ᵉ applique la
+    correction exacte. TP=-1.0 dBTP garde une marge anti-saturation."""
+    measured = _measure_loudnorm(src_path, target_lufs)
+    if measured is not None:
+        af = (
+            f"loudnorm=I={target_lufs}:TP=-1.0:LRA=11"
+            f":measured_I={measured['input_i']}"
+            f":measured_TP={measured['input_tp']}"
+            f":measured_LRA={measured['input_lra']}"
+            f":measured_thresh={measured['input_thresh']}"
+            f":offset={measured['target_offset']}"
+        )
+    else:
+        # Repli : passe simple (moins précise, mais garde un import fonctionnel
+        # si l'analyse a échoué).
+        af = f"loudnorm=I={target_lufs}:TP=-1.0:LRA=11"
+    cmd = [
+        "ffmpeg", "-y", "-i", src_path, "-vn",
+        "-af", af,
         "-c:a", "aac", "-b:a", "192k", dest_path,
     ]
     res = subprocess.run(cmd, capture_output=True, text=True)
