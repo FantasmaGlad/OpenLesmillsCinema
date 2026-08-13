@@ -4499,7 +4499,7 @@ h1, h2, h3, h4, h5, h6 {
    Page Paramètres (refonte en sections) + statut système
    déplacé depuis l'en-tête.
    ============================================================ */
-.settings-page { display: flex; flex-direction: column; gap: 18px; max-width: 760px; }
+.settings-page { display: flex; flex-direction: column; gap: 18px; width: 100%; }
 .settings-head { margin-bottom: 2px; }
 .settings-title { font-size: 1.5rem; font-weight: 800; margin: 0; }
 .settings-subtitle { font-size: 0.9rem; color: var(--text-muted); margin: 4px 0 0; }
