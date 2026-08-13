@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { usePlaybackSocket } from "@/lib/usePlaybackSocket";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { useAppSettings } from "@/lib/AppSettingsContext";
 import { useAutoFullscreen } from "@/lib/useAutoFullscreen";
@@ -31,9 +30,7 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
   const pathname = usePathname();
   const isMobile = useIsMobile();
   const { t } = useAppSettings();
-  const [isOnline, setIsOnline] = useState<boolean>(true);
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
-  const { state: playbackState, connected: playbackConnected } = usePlaybackSocket();
   // Réf. mission UI/UX — "plein écran de base sur mobile" : demande le
   // plein écran navigateur dès le premier tap (le remote/coach mobile n'a
   // aucune raison de garder la barre d'adresse visible).
@@ -51,49 +48,11 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
     pathname === "/radio" || pathname === "/radio/";
   useClickSound(!isFullscreenRoute);
 
-  const SCREEN_STATE_LABELS: Record<string, string> = {
-    waiting: t("playbackState.waiting"),
-    paused: t("playbackState.paused"),
-    coach_mode: t("playbackState.coach_mode"),
-    offline: t("playbackState.offline"),
-  };
-
   // La navigation ferme le tiroir mobile automatiquement (réf. UX4.1).
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronise l'état du tiroir avec le système de routing externe (Next.js), pas un simple calcul dérivable au rendu
     setDrawerOpen(false);
   }, [pathname]);
-
-  // Détecter l'URL API correcte
-  const getApiUrl = (path: string) => {
-    if (typeof window !== "undefined") {
-      if (window.location.port === "3000") {
-        return `http://localhost:8001/api${path}`;
-      }
-    }
-    return `/api${path}`;
-  };
-
-  useEffect(() => {
-    const checkHealth = async () => {
-      try {
-        const res = await fetch(getApiUrl("/health"), { cache: "no-store" });
-        if (res.ok) {
-          setIsOnline(true);
-        } else {
-          setIsOnline(false);
-        }
-      } catch {
-        setIsOnline(false);
-      }
-    };
-
-    checkHealth();
-    // 30 s : suffisant pour détecter une panne sans surcharger le serveur
-    // (le kiosque a ses propres timers indépendants dans kiosk/page.tsx)
-    const interval = setInterval(checkHealth, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Réf. mission UI/UX — icônes Google Material Symbols reprises telles
   // quelles du design importé (surface "PC Admin") plutôt que les SVG
@@ -168,18 +127,6 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
     return <>{children}</>;
   }
 
-  const screenLabel = !playbackConnected
-    ? t("playbackState.offline")
-    : playbackState.state === "playing"
-    ? t("playbackState.playing", { title: playbackState.current_video?.title ?? "" })
-    : SCREEN_STATE_LABELS[playbackState.state] ?? playbackState.state;
-
-  const screenDotClass = !playbackConnected
-    ? "offline"
-    : playbackState.state === "playing"
-    ? "active"
-    : "attente";
-
   if (isMobile) {
     // Réf. UX4.1 : pas de navigation permanente visible sur mobile — l'écran
     // principal (la page courante, généralement la télécommande) occupe tout
@@ -191,7 +138,6 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
             <Icon name="menu" size={24} />
           </button>
           <AppLogo size={32} className="mobile-topbar-logo" />
-          <div className={`status-dot ${screenDotClass} ${screenDotClass === "active" ? "olc-live-dot" : ""}`} title={screenLabel} />
         </header>
 
         <main className="mobile-page-content">{children}</main>
@@ -260,49 +206,8 @@ export default function ClientLayout({ children }: ClientLayoutProps) {
 
       {/* Main Area */}
       <div className="app-main">
-        {/* Permanent Header */}
-        <header className="app-header">
-          <div>
-            <h2 style={{ fontSize: "1.1rem", margin: 0 }}>
-              {pathname === "/" || pathname.startsWith("/dashboard-cable")
-                ? t("nav.dashboardCable")
-                : pathname.startsWith("/dashboard-network")
-                ? t("nav.dashboardNetwork")
-                : pathname.startsWith("/library")
-                ? t("header.libraryTitle")
-                : pathname.startsWith("/audio-playlists")
-                ? t("nav.audioPlaylists")
-                : pathname.startsWith("/audio")
-                ? t("header.audioTitle")
-                : pathname.startsWith("/backgrounds")
-                ? t("header.backgroundsTitle")
-                : pathname.startsWith("/playlists")
-                ? t("nav.playlists")
-                : pathname.startsWith("/schedule")
-                ? t("header.scheduleTitle")
-                : pathname.startsWith("/settings")
-                ? t("header.settingsTitle")
-                : t("header.appName")}
-            </h2>
-          </div>
-
-          <div className="status-indicator">
-            <div className="status-details" style={{ marginRight: "16px", textAlign: "right" }}>
-              <span className="status-label">{t("header.watcherLabel")}</span>
-              <span className="status-val">{isOnline ? t("header.watcherActive") : t("header.watcherInactive")}</span>
-            </div>
-            <div className="status-details" style={{ marginRight: "24px", textAlign: "right" }}>
-              <span className="status-label">{t("header.screenLabel")}</span>
-              <span className="status-val">{screenLabel}</span>
-            </div>
-            <div
-              className={`status-dot ${screenDotClass} ${screenDotClass === "active" ? "olc-live-dot" : ""}`}
-              title={playbackConnected ? t("header.screenOnline") : t("header.screenOffline")}
-            />
-          </div>
-        </header>
-
-        {/* Dynamic page content */}
+        {/* En-tête retiré (réf. demande) : le contenu occupe tout l'espace ;
+            le statut système (Watcher/Écran) est déplacé dans Paramètres. */}
         <main className="page-content">{children}</main>
       </div>
     </div>

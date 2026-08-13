@@ -6,9 +6,9 @@ import { translate, translateList, type Language } from "@/lib/i18n";
 // "les-mills-sombre" est la clé interne historique du thème "Sombre" (réf.
 // mission thèmes cinéma) — conservée telle quelle pour ne rien casser sur
 // les installations existantes, seul le libellé affiché change.
-export type Theme = "les-mills-sombre" | "clair" | "lune" | "menthe" | "automne" | "hiver" | "chili" | "ciel" | "orchidee" | "taupe" | "charbon";
+export type Theme = "les-mills-sombre" | "clair" | "lune" | "menthe" | "automne" | "hiver" | "chili" | "ciel" | "orchidee" | "taupe" | "charbon" | "beige" | "lavande";
 
-export const THEME_VALUES: Theme[] = ["les-mills-sombre", "clair", "lune", "menthe", "automne", "hiver", "chili", "ciel", "orchidee", "taupe", "charbon"];
+export const THEME_VALUES: Theme[] = ["les-mills-sombre", "clair", "lune", "menthe", "automne", "hiver", "chili", "ciel", "orchidee", "taupe", "charbon", "beige", "lavande"];
 
 interface AppSettingsContextValue {
   theme: Theme;

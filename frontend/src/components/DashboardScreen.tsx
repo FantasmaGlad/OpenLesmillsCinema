@@ -25,13 +25,6 @@ interface PlaylistSummary {
   total_duration_seconds: number;
 }
 
-interface AudioPlaylistSummary {
-  id: number;
-  name: string;
-  item_count: number;
-  total_duration_seconds: number;
-}
-
 interface OccurrenceSummary {
   schedule_id: number;
   run_at: string;
@@ -168,14 +161,8 @@ export default function DashboardScreen({ channel }: Props) {
   };
   const [videos, setVideos] = useState<VideoSummary[]>([]);
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
-  // Réf. correctif "fonctionnalité des playlists [audio] sur l'interface pc" :
-  // le mode coach (donc les playlists audio) est réservé au canal câblé —
-  // seule DashboardScreen("cable") en a besoin, mais l'état reste inconditionnel
-  // ici (comme `backgrounds` ci-dessous) pour ne pas complexifier les hooks.
-  const [audioPlaylists, setAudioPlaylists] = useState<AudioPlaylistSummary[]>([]);
   const [selectedVideoId, setSelectedVideoId] = useState<string>("");
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string>("");
-  const [selectedAudioPlaylistId, setSelectedAudioPlaylistId] = useState<string>("");
   const [seekDragValue, setSeekDragValue] = useState<number | null>(null);
   const [volumeDragValue, setVolumeDragValue] = useState<number | null>(null);
   const [interrupted, setInterrupted] = useState<InterruptedState | null>(null);
@@ -228,11 +215,6 @@ export default function DashboardScreen({ channel }: Props) {
       .then(setPlaylists)
       .catch(() => setPlaylists([]));
 
-    fetch(getApiUrl("/audio-playlists"), { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : []))
-      .then(setAudioPlaylists)
-      .catch(() => setAudioPlaylists([]));
-
     // F5.3 : une programmation peut interrompre une lecture manuelle à tout
     // moment pendant que ce tableau de bord est ouvert — on vérifie donc
     // périodiquement plutôt qu'au seul chargement de la page.
@@ -277,11 +259,6 @@ export default function DashboardScreen({ channel }: Props) {
   const handleLaunchPlaylist = () => {
     if (!selectedPlaylistId) return;
     sendCommand("load_playlist", { playlist_id: Number(selectedPlaylistId) });
-  };
-
-  const handleLaunchAudioPlaylist = () => {
-    if (!selectedAudioPlaylistId) return;
-    sendCommand("load_audio_playlist", { audio_playlist_id: Number(selectedAudioPlaylistId) });
   };
 
   const handlePlayPause = () => {
@@ -750,47 +727,6 @@ export default function DashboardScreen({ channel }: Props) {
             )}
           </div>
 
-          {/* Réf. correctif "fonctionnalité des playlists [audio] sur
-              l'interface pc" : la page permettait déjà de créer/éditer des
-              playlists audio (/audio-playlists) et de les lancer depuis le
-              mode coach (/coach) ou le téléphone, mais aucun raccourci de
-              lancement direct n'existait ici, contrairement aux playlists
-              vidéo juste au-dessus. Réservé au câblé, comme "Passer en mode
-              coach" ci-dessus : le mode audio coach n'existe que sur cet
-              écran. */}
-          {isCable && (
-            <div className="launch-block">
-              <h3>{t("dashboard.launchAudioPlaylistTitle")}</h3>
-              <div className="launch-row">
-                <select
-                  className="filter-select"
-                  style={{ flex: 1 }}
-                  value={selectedAudioPlaylistId}
-                  onChange={(e) => setSelectedAudioPlaylistId(e.target.value)}
-                >
-                  <option value="">{t("dashboard.chooseAudioPlaylist")}</option>
-                  {audioPlaylists.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.item_count} piste(s) — {formatDuration(p.total_duration_seconds)})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="btn btn-primary"
-                  onClick={handleLaunchAudioPlaylist}
-                  disabled={!selectedAudioPlaylistId}
-                >
-                  <Icon name="queue_music" size={16} />
-                  {t("dashboard.launch")}
-                </button>
-              </div>
-              {audioPlaylists.length === 0 && (
-                <p className="live-empty" style={{ marginTop: "12px" }}>
-                  {t("dashboard.noAudioPlaylists")}
-                </p>
-              )}
-            </div>
-          )}
         </>
       )}
     </div>

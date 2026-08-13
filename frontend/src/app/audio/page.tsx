@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useAppSettings } from "@/lib/AppSettingsContext";
 import { useUploadManager } from "@/lib/UploadManager";
+import { usePlaybackSocket } from "@/lib/usePlaybackSocket";
 import Icon from "@/components/Icon";
 
 interface AudioTrack {
@@ -30,6 +31,13 @@ interface AudioCourseDetail extends AudioCourseSummary {
 interface BackgroundOption {
   id: number;
   title: string;
+}
+
+interface AudioPlaylistSummary {
+  id: number;
+  name: string;
+  item_count: number;
+  total_duration_seconds: number;
 }
 
 interface ToastState {
@@ -96,6 +104,24 @@ export default function AudioLibraryPage() {
   const [uploadProgram, setUploadProgram] = useState("RPM");
   const [uploadRelease, setUploadRelease] = useState("");
   const [dragActive, setDragActive] = useState(false);
+
+  // Lanceur de playlist audio sur l'écran coach (déplacé depuis le tableau de
+  // bord câblé, réf. demande) : actif uniquement quand le câblé est DÉJÀ en
+  // mode coach — sinon on passe d'abord par « Passer en mode coach » (/coach).
+  const { state: pbState, sendCommand: pbSend } = usePlaybackSocket();
+  const [audioPlaylists, setAudioPlaylists] = useState<AudioPlaylistSummary[]>([]);
+  const [coachPlaylistId, setCoachPlaylistId] = useState("");
+  useEffect(() => {
+    fetch(getApiUrl("/audio-playlists"), { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setAudioPlaylists)
+      .catch(() => setAudioPlaylists([]));
+  }, []);
+  const cableInCoach = pbState.state === "coach_mode";
+  const launchCoachPlaylist = () => {
+    if (!coachPlaylistId || !cableInCoach) return;
+    pbSend("load_audio_playlist", { audio_playlist_id: Number(coachPlaylistId) });
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Réf. mission "queue en direct des importations + import parallèle" :
@@ -312,6 +338,36 @@ export default function AudioLibraryPage() {
           <span>{toast.message}</span>
         </div>
       )}
+
+      <div className="launch-block" style={{ marginBottom: "16px" }}>
+        <h3>{t("audio.coachLaunchTitle")}</h3>
+        <p className="live-block-hint" style={{ margin: "0 0 10px" }}>
+          {cableInCoach ? t("audio.coachLaunchHint") : t("audio.coachLaunchDisabledHint")}
+        </p>
+        <div className="launch-row">
+          <select
+            className="filter-select"
+            style={{ flex: 1 }}
+            value={coachPlaylistId}
+            onChange={(e) => setCoachPlaylistId(e.target.value)}
+            disabled={!cableInCoach}
+          >
+            <option value="">{t("audio.coachChoosePlaylist")}</option>
+            {audioPlaylists.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.item_count} — {formatDuration(p.total_duration_seconds)})
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn btn-primary"
+            onClick={launchCoachPlaylist}
+            disabled={!cableInCoach || !coachPlaylistId}
+          >
+            <Icon name="queue_music" size={16} /> {t("audio.coachLaunch")}
+          </button>
+        </div>
+      </div>
 
       <div
         className={`upload-zone ${dragActive ? "drag-active" : ""}`}

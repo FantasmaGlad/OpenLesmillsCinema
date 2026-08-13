@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from "react";
 import { useAppSettings, type Theme } from "@/lib/AppSettingsContext";
 import type { Language } from "@/lib/i18n";
+import SystemStatus from "@/components/SystemStatus";
+import Icon from "@/components/Icon";
 
 interface SettingsData {
   wait_time_between_courses: number;
@@ -20,8 +22,7 @@ interface StorageData {
   path: string;
 }
 
-/** Octets -> unité lisible (Go/Mo…), base 1024, réf. mission "indicateur de
- * la quantité de stockage restant pour monitorer la capacité". */
+/** Octets -> unité lisible (Go/Mo…), base 1024. */
 function formatBytes(bytes: number): string {
   if (!bytes || bytes < 0) return "0 o";
   const units = ["o", "Ko", "Mo", "Go", "To"];
@@ -42,9 +43,6 @@ function getApiUrl(path: string) {
   return `/api${path}`;
 }
 
-// Aperçu à 4 couleurs par thème (réf. mission "thèmes cinéma") : mêmes
-// valeurs que les blocs :root[data-theme="..."] de globals.css, pour que la
-// vignette reflète fidèlement le thème réellement appliqué.
 const THEME_SWATCHES: { value: Theme; labelKey: string; colors: [string, string, string, string] }[] = [
   { value: "les-mills-sombre", labelKey: "settingsPage.themeDark", colors: ["#0a0a0a", "#1e1e20", "#e4002b", "#ffffff"] },
   { value: "clair", labelKey: "settingsPage.themeLight", colors: ["#f4f4f5", "#ffffff", "#e4002b", "#16161a"] },
@@ -57,6 +55,8 @@ const THEME_SWATCHES: { value: Theme; labelKey: string; colors: [string, string,
   { value: "orchidee", labelKey: "settingsPage.themeOrchidee", colors: ["#ed80e9", "#c96dc6", "#784176", "#4f2b4e"] },
   { value: "taupe", labelKey: "settingsPage.themeTaupe", colors: ["#fcd3ae", "#ab8f76", "#826d5a", "#54463a"] },
   { value: "charbon", labelKey: "settingsPage.themeCharbon", colors: ["#f2f2f2", "#a1a1a1", "#4a4a4a", "#1a1a1a"] },
+  { value: "beige", labelKey: "settingsPage.themeBeige", colors: ["#ede8d0", "#c9bfa0", "#6b5751", "#372528"] },
+  { value: "lavande", labelKey: "settingsPage.themeLavande", colors: ["#d3d3ff", "#bcbcf0", "#a47dab", "#2c2140"] },
 ];
 
 const PATH_LABEL_KEYS: Record<string, string> = {
@@ -70,6 +70,10 @@ const PATH_LABEL_KEYS: Record<string, string> = {
   audio_watch_dir: "settingsPage.paths.audio_watch_dir",
 };
 
+// Phrase à recopier pour armer la désinstallation (comparée sans casse/accent).
+const UNINSTALL_PHRASE = "DÉSINSTALLER";
+const normalizePhrase = (s: string) => s.trim().toUpperCase().replace(/É/g, "E");
+
 export default function SettingsPage() {
   const { theme, language, setTheme, setLanguage, t } = useAppSettings();
   const [data, setData] = useState<SettingsData | null>(null);
@@ -79,12 +83,15 @@ export default function SettingsPage() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [showUninstall, setShowUninstall] = useState(false);
+  const [uninstallConfirm, setUninstallConfirm] = useState("");
+  const [uninstalling, setUninstalling] = useState(false);
 
   const showToast = (message: string, type: ToastState["type"] = "success") => setToast({ message, type });
 
   useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 4000);
+    const timer = setTimeout(() => setToast(null), 5000);
     return () => clearTimeout(timer);
   }, [toast]);
 
@@ -96,9 +103,6 @@ export default function SettingsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Indicateur de stockage (réf. mission "monitorer la capacité de
-  // l'application") : rafraîchi toutes les 30 s pour refléter les imports en
-  // cours sans avoir à recharger la page.
   useEffect(() => {
     let cancelled = false;
     const fetchStorage = () => {
@@ -165,25 +169,54 @@ export default function SettingsPage() {
     }
   };
 
+  const handleUninstall = async () => {
+    setUninstalling(true);
+    try {
+      const res = await fetch(getApiUrl("/settings/system/uninstall"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: uninstallConfirm }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showToast(payload.message || t("settingsPage.uninstallStarted"), "warning");
+      } else {
+        showToast(payload.detail || t("settingsPage.uninstallError"), "error");
+      }
+    } catch {
+      showToast(t("common.networkError"), "error");
+    } finally {
+      setUninstalling(false);
+      setShowUninstall(false);
+      setUninstallConfirm("");
+    }
+  };
+
+  const uninstallReady = normalizePhrase(uninstallConfirm) === "DESINSTALLER";
+
   if (loading) {
     return <div className="live-empty">{t("common.loading")}</div>;
   }
-
   if (!data) {
     return <div className="live-empty">{t("settingsPage.loadError")}</div>;
   }
 
   return (
-    <div className="dashboard-container" style={{ maxWidth: "640px" }}>
+    <div className="settings-page">
       {toast && (
         <div className={`toast ${toast.type}`}>
           <span>{toast.message}</span>
         </div>
       )}
 
-      <form className="live-block" onSubmit={handleSave} style={{ gap: "20px" }}>
-        <h3>{t("settingsPage.playbackSection")}</h3>
+      <div className="settings-head">
+        <h1 className="settings-title">{t("header.settingsTitle")}</h1>
+        <p className="settings-subtitle">{t("settingsPage.subtitle")}</p>
+      </div>
 
+      {/* ---- Apparence : thèmes + langue ---- */}
+      <section className="live-block">
+        <h3><Icon name="palette" size={18} /> {t("settingsPage.appearanceSection")}</h3>
         <div className="form-group">
           <label className="form-label">{t("settingsPage.themeLabel")}</label>
           <div className="theme-picker-grid">
@@ -203,103 +236,117 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
-          <p style={{ fontSize: "0.75rem", color: "var(--text-dim)", margin: "4px 0 0" }}>
-            {t("settingsPage.themeHint")}
-          </p>
+          <p className="settings-hint">{t("settingsPage.themeHint")}</p>
         </div>
 
-        <div className="form-group">
+        <div className="form-group" style={{ maxWidth: "320px" }}>
           <label className="form-label">{t("settingsPage.languageLabel")}</label>
-          <select
-            className="form-control"
-            value={language}
-            onChange={(e) => setLanguage(e.target.value as Language)}
-          >
+          <select className="form-control" value={language} onChange={(e) => setLanguage(e.target.value as Language)}>
             <option value="fr">{t("settingsPage.languageFr")}</option>
             <option value="en">{t("settingsPage.languageEn")}</option>
           </select>
-          <p style={{ fontSize: "0.75rem", color: "var(--text-dim)", margin: "4px 0 0" }}>
-            {t("settingsPage.languageHint")}
-          </p>
+          <p className="settings-hint">{t("settingsPage.languageHint")}</p>
         </div>
+      </section>
 
-        <div className="form-group">
-          <label className="form-label">{t("settingsPage.waitTimeLabel")}</label>
-          <input
-            type="number"
-            min={0}
-            className="form-control"
-            value={data.wait_time_between_courses}
-            onChange={(e) => setData({ ...data, wait_time_between_courses: Number(e.target.value) })}
-          />
+      {/* ---- Lecture ---- */}
+      <form className="live-block" onSubmit={handleSave}>
+        <h3><Icon name="play_circle" size={18} /> {t("settingsPage.playbackSection")}</h3>
+        <div className="settings-fields">
+          <div className="form-group">
+            <label className="form-label">{t("settingsPage.waitTimeLabel")}</label>
+            <input type="number" min={0} className="form-control" value={data.wait_time_between_courses}
+              onChange={(e) => setData({ ...data, wait_time_between_courses: Number(e.target.value) })} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">{t("settingsPage.volumeLabel")}</label>
+            <input type="number" min={0} max={100} className="form-control" value={data.volume_default}
+              onChange={(e) => setData({ ...data, volume_default: Number(e.target.value) })} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">{t("settingsPage.chainTimerLabel")}</label>
+            <input type="number" min={1} className="form-control" value={data.audio_chain_timer_seconds}
+              onChange={(e) => setData({ ...data, audio_chain_timer_seconds: Number(e.target.value) })} />
+          </div>
         </div>
-
-        <div className="form-group">
-          <label className="form-label">{t("settingsPage.volumeLabel")}</label>
-          <input
-            type="number"
-            min={0}
-            max={100}
-            className="form-control"
-            value={data.volume_default}
-            onChange={(e) => setData({ ...data, volume_default: Number(e.target.value) })}
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">{t("settingsPage.chainTimerLabel")}</label>
-          <input
-            type="number"
-            min={1}
-            className="form-control"
-            value={data.audio_chain_timer_seconds}
-            onChange={(e) => setData({ ...data, audio_chain_timer_seconds: Number(e.target.value) })}
-          />
-        </div>
-
-        <button type="submit" className="btn btn-primary" style={{ height: "48px" }} disabled={saving}>
+        <button type="submit" className="btn btn-primary" style={{ height: "48px", alignSelf: "flex-start", marginTop: "4px" }} disabled={saving}>
           {saving ? t("common.saving") : t("common.save")}
         </button>
       </form>
 
-      <div className="live-block">
-        <h3>{t("settingsPage.syncSection")}</h3>
-        <p className="live-empty">{t("settingsPage.syncHint")}</p>
-        <button
-          type="button"
-          className="btn btn-primary"
-          style={{ height: "48px", backgroundColor: "var(--accent-error)" }}
-          onClick={() => setShowResetConfirm(true)}
-        >
-          {t("settingsPage.syncResetButton")}
-        </button>
-      </div>
+      {/* ---- Stockage ---- */}
+      <section className="live-block">
+        <h3><Icon name="storage" size={18} /> {t("settingsPage.storageSection")}</h3>
+        {storage ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px" }}>
+              <span style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--text-main)" }}>
+                {t("settingsPage.storageFreeOfTotal", { free: formatBytes(storage.free_bytes), total: formatBytes(storage.total_bytes) })}
+              </span>
+              <span style={{ fontSize: "0.85rem", fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                color: storage.used_percent >= 90 ? "var(--accent-error)" : storage.used_percent >= 75 ? "#f59e0b" : "var(--text-muted)" }}>
+                {t("settingsPage.storageUsedPercent", { percent: storage.used_percent })}
+              </span>
+            </div>
+            <div style={{ height: "10px", borderRadius: "999px", background: "var(--bg-surface-hover)", overflow: "hidden" }}>
+              <div style={{ width: `${Math.min(100, storage.used_percent)}%`, height: "100%", borderRadius: "999px", transition: "width 0.4s ease",
+                background: storage.used_percent >= 90 ? "var(--accent-error)" : storage.used_percent >= 75 ? "#f59e0b" : "var(--accent-primary)" }} />
+            </div>
+            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{t("settingsPage.storageApp", { app: formatBytes(storage.app_bytes) })}</span>
+            <p className="settings-hint">{t("settingsPage.storageHint")}</p>
+          </div>
+        ) : (
+          <p className="live-empty">{t("settingsPage.storageError")}</p>
+        )}
+      </section>
 
+      {/* ---- État système (déplacé depuis l'en-tête) ---- */}
+      <section className="live-block">
+        <h3><Icon name="monitor_heart" size={18} /> {t("settingsPage.statusSection")}</h3>
+        <SystemStatus />
+      </section>
+
+      {/* ---- Maintenance : resync ---- */}
+      <section className="live-block">
+        <h3><Icon name="sync" size={18} /> {t("settingsPage.syncSection")}</h3>
+        <p className="settings-hint" style={{ marginTop: 0 }}>{t("settingsPage.syncHint")}</p>
+        <button type="button" className="btn btn-secondary" style={{ height: "44px", alignSelf: "flex-start" }} onClick={() => setShowResetConfirm(true)}>
+          <Icon name="restart_alt" size={16} /> {t("settingsPage.syncResetButton")}
+        </button>
+      </section>
+
+      {/* ---- Zone de danger : désinstallation ---- */}
+      <section className="live-block settings-danger">
+        <h3><Icon name="warning" size={18} /> {t("settingsPage.dangerSection")}</h3>
+        <p className="settings-hint" style={{ marginTop: 0 }}>{t("settingsPage.uninstallHint")}</p>
+        <button type="button" className="btn btn-danger" style={{ height: "44px", alignSelf: "flex-start" }} onClick={() => setShowUninstall(true)}>
+          <Icon name="delete_forever" size={16} /> {t("settingsPage.uninstallButton")}
+        </button>
+      </section>
+
+      {/* ---- Documentation : chemins (lecture seule) ---- */}
+      <section className="live-block">
+        <h3><Icon name="description" size={18} /> {t("settingsPage.docSection")}</h3>
+        <p className="settings-hint" style={{ marginTop: 0 }}>{t("settingsPage.docHint")}</p>
+        <div className="settings-paths">
+          {Object.entries(data.paths).map(([key, value]) => (
+            <div key={key} className="settings-path-row">
+              <span className="settings-path-key">{t(PATH_LABEL_KEYS[key] || key)}</span>
+              <span className="settings-path-val">{value}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ---- Modale : resync ---- */}
       {showResetConfirm && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>
-              {t("settingsPage.syncResetButton")}
-            </h3>
-            <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
-              {t("settingsPage.syncResetConfirm")}
-            </p>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>{t("settingsPage.syncResetButton")}</h3>
+            <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>{t("settingsPage.syncResetConfirm")}</p>
             <div className="modal-actions">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setShowResetConfirm(false)}
-                disabled={resetting}
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={{ backgroundColor: "var(--accent-error)" }}
-                onClick={handleFullReset}
-                disabled={resetting}
-              >
+              <button type="button" className="btn btn-secondary" onClick={() => setShowResetConfirm(false)} disabled={resetting}>{t("common.cancel")}</button>
+              <button type="button" className="btn btn-primary" style={{ backgroundColor: "var(--accent-error)" }} onClick={handleFullReset} disabled={resetting}>
                 {resetting ? t("settingsPage.syncResetInProgress") : t("settingsPage.syncResetButton")}
               </button>
             </div>
@@ -307,81 +354,42 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <div className="live-block">
-        <h3>{t("settingsPage.storageSection")}</h3>
-        {storage ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px" }}>
-              <span style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--text-main)" }}>
-                {t("settingsPage.storageFreeOfTotal", {
-                  free: formatBytes(storage.free_bytes),
-                  total: formatBytes(storage.total_bytes),
-                })}
-              </span>
-              <span
-                style={{
-                  fontSize: "0.85rem",
-                  fontWeight: 700,
-                  fontVariantNumeric: "tabular-nums",
-                  color:
-                    storage.used_percent >= 90
-                      ? "var(--accent-error)"
-                      : storage.used_percent >= 75
-                      ? "#f59e0b"
-                      : "var(--text-muted)",
-                }}
-              >
-                {t("settingsPage.storageUsedPercent", { percent: storage.used_percent })}
-              </span>
+      {/* ---- Modale : désinstallation (recopie de phrase obligatoire) ---- */}
+      {showUninstall && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0, color: "var(--accent-error)" }}>
+              <Icon name="delete_forever" size={20} /> {t("settingsPage.uninstallButton")}
+            </h3>
+            <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>{t("settingsPage.uninstallConfirmText")}</p>
+            <ul className="settings-uninstall-list">
+              <li>{t("settingsPage.uninstallItemServices")}</li>
+              <li>{t("settingsPage.uninstallItemApp")}</li>
+              <li>{t("settingsPage.uninstallItemData")}</li>
+              <li>{t("settingsPage.uninstallItemKeepPackages")}</li>
+            </ul>
+            <label className="form-label" style={{ marginBottom: "4px" }}>
+              {t("settingsPage.uninstallTypeLabel", { phrase: UNINSTALL_PHRASE })}
+            </label>
+            <input
+              type="text"
+              className="form-control"
+              value={uninstallConfirm}
+              onChange={(e) => setUninstallConfirm(e.target.value)}
+              placeholder={UNINSTALL_PHRASE}
+              autoFocus
+            />
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => { setShowUninstall(false); setUninstallConfirm(""); }} disabled={uninstalling}>
+                {t("common.cancel")}
+              </button>
+              <button type="button" className="btn btn-danger" onClick={handleUninstall} disabled={!uninstallReady || uninstalling}>
+                {uninstalling ? t("settingsPage.uninstallInProgress") : t("settingsPage.uninstallConfirmButton")}
+              </button>
             </div>
-            <div
-              style={{
-                height: "10px",
-                borderRadius: "999px",
-                background: "var(--bg-surface-hover)",
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  width: `${Math.min(100, storage.used_percent)}%`,
-                  height: "100%",
-                  borderRadius: "999px",
-                  transition: "width 0.4s ease",
-                  background:
-                    storage.used_percent >= 90
-                      ? "var(--accent-error)"
-                      : storage.used_percent >= 75
-                      ? "#f59e0b"
-                      : "var(--accent-primary)",
-                }}
-              />
-            </div>
-            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-              {t("settingsPage.storageApp", { app: formatBytes(storage.app_bytes) })}
-            </span>
-            <p style={{ fontSize: "0.75rem", color: "var(--text-dim)", margin: 0 }}>
-              {t("settingsPage.storageHint")}
-            </p>
           </div>
-        ) : (
-          <p className="live-empty">{t("settingsPage.storageError")}</p>
-        )}
-      </div>
-
-      <div className="live-block">
-        <h3>{t("settingsPage.pathsSection")}</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          {Object.entries(data.paths).map(([key, value]) => (
-            <div key={key} style={{ display: "flex", justifyContent: "space-between", gap: "16px", fontSize: "0.85rem" }}>
-              <span style={{ color: "var(--text-muted)" }}>{t(PATH_LABEL_KEYS[key] || key)}</span>
-              <span style={{ color: "var(--text-main)", fontFamily: "monospace", textAlign: "right", wordBreak: "break-all" }}>
-                {value}
-              </span>
-            </div>
-          ))}
         </div>
-      </div>
+      )}
     </div>
   );
 }

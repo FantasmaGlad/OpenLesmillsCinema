@@ -1,14 +1,17 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useAppSettings } from "@/lib/AppSettingsContext";
 import { useUploadManager } from "@/lib/UploadManager";
 import Icon from "@/components/Icon";
 
-// Bibliothèque musicale Radio (réf. docs/cahier-des-charges-radio.md, lots L1+L2).
-// Trois vues séparées (décision D7) : « Morceaux & Playlists », « Artistes &
-// Albums », « Tags & Genres ». Le dashboard de contrôle et la lecture arrivent
-// aux lots suivants.
+// Bibliothèque musicale Radio — écran unique « vue d'ensemble » (refonte).
+// Barre latérale persistante (playlists / tags / genres / artistes, tous
+// cliquables pour filtrer) + grille principale avec sélection multiple et
+// actions groupées (taguer, ajouter à une playlist, supprimer). L'import est
+// une modale (bouton dans la barre) plutôt qu'une zone géante au milieu. Les
+// tags s'attribuent par clics (chips) dans le drawer d'un morceau ou en lot ;
+// les playlists se réordonnent en glisser-déposer.
 
 interface RadioTrack {
   id: number;
@@ -52,7 +55,6 @@ interface ArtistEntry { name: string; track_count: number; album_count: number; 
 interface AlbumEntry { album: string; album_artist: string | null; track_count: number; year: number | null; cover_track_id: number | null; }
 interface TagEntry { id: number; name: string; track_count: number; }
 
-type ViewMode = "library" | "browse" | "tags";
 type Filter = { type: "artist" | "album" | "genre" | "tag"; value: string } | null;
 
 interface ToastState { message: string; type: "success" | "error" | "warning"; }
@@ -77,27 +79,35 @@ export default function RadioLibraryPage() {
   const [tracks, setTracks] = useState<RadioTrack[]>([]);
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
   const [artists, setArtists] = useState<ArtistEntry[]>([]);
-  const [albums, setAlbums] = useState<AlbumEntry[]>([]);
+  const [, setAlbums] = useState<AlbumEntry[]>([]);
   const [tagsList, setTagsList] = useState<TagEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [coverVersion, setCoverVersion] = useState(0);
 
-  const [view, setView] = useState<ViewMode>("library");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>(null);
+  const [artistsOpen, setArtistsOpen] = useState(false);
 
-  // Import
+  // Sélection multiple + actions groupées
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkMenu, setBulkMenu] = useState<null | "tag" | "playlist">(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+
+  // Import (modale)
+  const [importOpen, setImportOpen] = useState(false);
   const [uploadMode, setUploadMode] = useState<"files" | "zip">("files");
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Édition d'un morceau
-  const [selected, setSelected] = useState<RadioTrack | null>(null);
+  const [selectedTrack, setSelectedTrack] = useState<RadioTrack | null>(null);
   const [form, setForm] = useState({
     title: "", artist: "", album: "", album_artist: "",
-    track_number: "", disc_number: "", year: "", genre: "", tags: "",
+    track_number: "", disc_number: "", year: "", genre: "",
   });
+  const [drawerTags, setDrawerTags] = useState<string[]>([]);
+  const [newChip, setNewChip] = useState("");
   const [savingDrawer, setSavingDrawer] = useState(false);
   const [toDelete, setToDelete] = useState<RadioTrack | null>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -107,6 +117,8 @@ export default function RadioLibraryPage() {
   const [editingPlaylist, setEditingPlaylist] = useState<PlaylistDetail | null>(null);
   const [addTrackSearch, setAddTrackSearch] = useState("");
   const [playlistToDelete, setPlaylistToDelete] = useState<PlaylistSummary | null>(null);
+  const dragIndexRef = useRef<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Tags
   const [newTagName, setNewTagName] = useState("");
@@ -173,6 +185,7 @@ export default function RadioLibraryPage() {
     }
     showToast(t("radioLibrary.importStarted"));
     if (fileInputRef.current) fileInputRef.current.value = "";
+    setImportOpen(false);
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -189,7 +202,7 @@ export default function RadioLibraryPage() {
 
   // ---- Édition d'un morceau ----
   const openTrack = (track: RadioTrack) => {
-    setSelected(track);
+    setSelectedTrack(track);
     setForm({
       title: track.title,
       artist: track.artist ?? "",
@@ -199,8 +212,9 @@ export default function RadioLibraryPage() {
       disc_number: track.disc_number != null ? String(track.disc_number) : "",
       year: track.year != null ? String(track.year) : "",
       genre: track.genre ?? "",
-      tags: track.tags.join(", "),
     });
+    setDrawerTags([...track.tags]);
+    setNewChip("");
   };
 
   const parseIntOrNull = (value: string): number | null => {
@@ -210,12 +224,22 @@ export default function RadioLibraryPage() {
     return Number.isNaN(n) ? null : n;
   };
 
+  const toggleDrawerTag = (name: string) => {
+    setDrawerTags((prev) => (prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name]));
+  };
+  const addChip = () => {
+    const name = newChip.trim();
+    if (!name) return;
+    setDrawerTags((prev) => (prev.includes(name) ? prev : [...prev, name]));
+    setNewChip("");
+  };
+
   const saveMetadata = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selected || !form.title.trim()) { showToast(t("radioLibrary.saveError"), "warning"); return; }
+    if (!selectedTrack || !form.title.trim()) { showToast(t("radioLibrary.saveError"), "warning"); return; }
     setSavingDrawer(true);
     try {
-      const res = await fetch(getApiUrl(`/radio/tracks/${selected.id}`), {
+      const res = await fetch(getApiUrl(`/radio/tracks/${selectedTrack.id}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -224,12 +248,13 @@ export default function RadioLibraryPage() {
           track_number: parseIntOrNull(form.track_number),
           disc_number: parseIntOrNull(form.disc_number),
           year: parseIntOrNull(form.year),
-          tags: form.tags.split(",").map((s) => s.trim()).filter(Boolean),
+          tags: drawerTags,
         }),
       });
       if (res.ok) {
         const updated: RadioTrack = await res.json();
-        setSelected(updated);
+        setSelectedTrack(updated);
+        setDrawerTags([...updated.tags]);
         showToast(t("radioLibrary.updatedToast"));
         refreshAll();
       } else showToast(t("radioLibrary.saveError"), "error");
@@ -238,14 +263,14 @@ export default function RadioLibraryPage() {
   };
 
   const handleCoverSelected = async (fileList: FileList | null) => {
-    if (!selected || !fileList || fileList.length === 0) return;
+    if (!selectedTrack || !fileList || fileList.length === 0) return;
     const fd = new FormData();
     fd.append("file", fileList[0]);
     try {
-      const res = await fetch(getApiUrl(`/radio/tracks/${selected.id}/cover`), { method: "POST", body: fd });
+      const res = await fetch(getApiUrl(`/radio/tracks/${selectedTrack.id}/cover`), { method: "POST", body: fd });
       if (res.ok) {
         const updated: RadioTrack = await res.json();
-        setSelected(updated);
+        setSelectedTrack(updated);
         setCoverVersion((v) => v + 1);
         showToast(t("radioLibrary.coverUpdatedToast"));
         refreshAll();
@@ -260,11 +285,61 @@ export default function RadioLibraryPage() {
       const res = await fetch(getApiUrl(`/radio/tracks/${toDelete.id}`), { method: "DELETE" });
       if (res.ok) {
         showToast(t("radioLibrary.deletedToast"));
-        if (selected?.id === toDelete.id) setSelected(null);
+        if (selectedTrack?.id === toDelete.id) setSelectedTrack(null);
         refreshAll();
       } else showToast(t("radioLibrary.deleteError"), "error");
     } catch { showToast(t("radioLibrary.connectionError"), "error"); }
     finally { setToDelete(null); }
+  };
+
+  // ---- Sélection multiple ----
+  const toggleSelect = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const clearSelection = () => { setSelected(new Set()); setBulkMenu(null); };
+
+  const applyTagToSelection = async (name: string, add: boolean) => {
+    const targets = tracks.filter((tr) => selected.has(tr.id));
+    await Promise.all(targets.map((tr) => {
+      const has = tr.tags.includes(name);
+      if (add === has) return Promise.resolve();
+      const nextTags = add ? [...tr.tags, name] : tr.tags.filter((x) => x !== name);
+      return fetch(getApiUrl(`/radio/tracks/${tr.id}`), {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags: nextTags }),
+      });
+    }));
+    showToast(t("radioLibrary.tagsAppliedToast"));
+    refreshAll();
+  };
+
+  const addSelectionToPlaylist = async (playlistId: number) => {
+    const detail = await fetchJson<PlaylistDetail | null>(`/radio/playlists/${playlistId}`, null);
+    if (!detail) { showToast(t("radioLibrary.playlistError"), "error"); return; }
+    const existing = detail.items.map((i) => i.track.id);
+    const merged = [...existing];
+    selected.forEach((id) => { if (!merged.includes(id)) merged.push(id); });
+    try {
+      const res = await fetch(getApiUrl(`/radio/playlists/${playlistId}`), {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: detail.name, track_ids: merged }),
+      });
+      if (res.ok) { showToast(t("radioLibrary.bulkAddedToPlaylistToast")); setBulkMenu(null); refreshAll(); }
+      else showToast(t("radioLibrary.playlistError"), "error");
+    } catch { showToast(t("radioLibrary.playlistError"), "error"); }
+  };
+
+  const confirmBulkDelete = async () => {
+    const ids = Array.from(selected);
+    await Promise.all(ids.map((id) => fetch(getApiUrl(`/radio/tracks/${id}`), { method: "DELETE" }).catch(() => null)));
+    showToast(t("radioLibrary.bulkDeletedToast", { count: ids.length }));
+    setBulkDeleteOpen(false);
+    clearSelection();
+    refreshAll();
   };
 
   // ---- Playlists ----
@@ -309,15 +384,6 @@ export default function RadioLibraryPage() {
     return false;
   };
 
-  const reorderItem = (index: number, dir: -1 | 1) => {
-    if (!editingPlaylist) return;
-    const ids = editingPlaylist.items.map((i) => i.track.id);
-    const j = index + dir;
-    if (j < 0 || j >= ids.length) return;
-    [ids[index], ids[j]] = [ids[j], ids[index]];
-    savePlaylist(editingPlaylist.id, editingPlaylist.name, ids);
-  };
-
   const removeFromPlaylist = (trackId: number) => {
     if (!editingPlaylist) return;
     const ids = editingPlaylist.items.map((i) => i.track.id).filter((id) => id !== trackId);
@@ -337,6 +403,18 @@ export default function RadioLibraryPage() {
         refreshAll();
       } else showToast(t("radioLibrary.playlistError"), "error");
     } catch { showToast(t("radioLibrary.playlistError"), "error"); }
+  };
+
+  // Réordonnancement glisser-déposer (natif HTML5, pas de dépendance).
+  const handleItemDrop = (dropIndex: number) => {
+    const from = dragIndexRef.current;
+    dragIndexRef.current = null;
+    setDragOverIndex(null);
+    if (from === null || from === dropIndex || !editingPlaylist) return;
+    const ids = editingPlaylist.items.map((i) => i.track.id);
+    const [moved] = ids.splice(from, 1);
+    ids.splice(dropIndex, 0, moved);
+    savePlaylist(editingPlaylist.id, editingPlaylist.name, ids);
   };
 
   const toggleDefault = async () => {
@@ -374,6 +452,7 @@ export default function RadioLibraryPage() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
       });
       if (res.ok) { setNewTagName(""); showToast(t("radioLibrary.tagCreatedToast")); refreshAll(); }
+      else if (res.status === 409) showToast(t("radioLibrary.tagExists"), "warning");
       else showToast(t("radioLibrary.tagError"), "error");
     } catch { showToast(t("radioLibrary.tagError"), "error"); }
   };
@@ -393,22 +472,25 @@ export default function RadioLibraryPage() {
     if (!window.confirm(t("radioLibrary.deleteTagConfirm", { name: tag.name }))) return;
     try {
       const res = await fetch(getApiUrl(`/radio/tags/${tag.id}`), { method: "DELETE" });
-      if (res.ok) { showToast(t("radioLibrary.tagDeletedToast")); refreshAll(); }
-      else showToast(t("radioLibrary.tagError"), "error");
+      if (res.ok) {
+        showToast(t("radioLibrary.tagDeletedToast"));
+        if (filter?.type === "tag" && filter.value === tag.name) setFilter(null);
+        refreshAll();
+      } else showToast(t("radioLibrary.tagError"), "error");
     } catch { showToast(t("radioLibrary.tagError"), "error"); }
   };
 
-  const applyFilter = (f: Filter) => { setFilter(f); setView("library"); setSearch(""); };
+  const applyFilter = (f: Filter) => { setFilter(f); };
 
   // ---- Dérivés ----
-  const genres = (() => {
+  const genres = useMemo(() => {
     const map = new Map<string, number>();
     tracks.forEach((tr) => { if (tr.genre) map.set(tr.genre, (map.get(tr.genre) ?? 0) + 1); });
     return Array.from(map.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
-  })();
+  }, [tracks]);
 
   const q = search.trim().toLowerCase();
-  const filteredTracks = tracks.filter((tr) => {
+  const filteredTracks = useMemo(() => tracks.filter((tr) => {
     if (q && ![tr.title, tr.artist, tr.album].some((f) => (f ?? "").toLowerCase().includes(q))) return false;
     if (filter) {
       if (filter.type === "artist" && tr.artist !== filter.value && tr.album_artist !== filter.value) return false;
@@ -417,7 +499,7 @@ export default function RadioLibraryPage() {
       if (filter.type === "tag" && !tr.tags.includes(filter.value)) return false;
     }
     return true;
-  });
+  }), [tracks, q, filter]);
 
   const addableTracks = editingPlaylist
     ? tracks.filter((tr) => {
@@ -426,225 +508,294 @@ export default function RadioLibraryPage() {
       })
     : [];
 
-  // ---- Rendu : cartes ----
-  const trackCard = (track: RadioTrack) => (
-    <div key={track.id} className="video-card" onClick={() => openTrack(track)}>
-      <div className="thumbnail-wrapper" style={{ position: "relative", aspectRatio: "1 / 1", paddingTop: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-surface-elevated)" }}>
-        {track.has_cover ? (
-          // eslint-disable-next-line @next/next/no-img-element -- pochette servie par l'API
-          <img src={trackCoverUrl(track.id)} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-        ) : (
-          <Icon name="music_note" size={40} style={{ opacity: 0.25 }} />
-        )}
-        <span className="card-duration">{formatDuration(track.duration_seconds)}</span>
-      </div>
-      <div className="card-content">
-        <h4 className="card-title" title={track.title}>{track.title}</h4>
-        <div className="card-meta-row">
-          <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {track.artist || t("radioLibrary.unknownArtist")}
-          </span>
+  const visibleIds = filteredTracks.map((tr) => tr.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const toggleSelectAllVisible = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  // État tri-valué d'un tag sur la sélection courante (pour le menu de tag en lot).
+  const selectionTagState = (name: string): "all" | "some" | "none" => {
+    const targets = tracks.filter((tr) => selected.has(tr.id));
+    if (targets.length === 0) return "none";
+    const withTag = targets.filter((tr) => tr.tags.includes(name)).length;
+    if (withTag === 0) return "none";
+    if (withTag === targets.length) return "all";
+    return "some";
+  };
+
+  const filterLabel = filter ? filter.value : t("radioLibrary.allTracks");
+
+  // ---- Rendu : carte morceau ----
+  const trackCard = (track: RadioTrack) => {
+    const isSel = selected.has(track.id);
+    return (
+      <div key={track.id} className={`video-card rl-card ${isSel ? "selected" : ""}`} onClick={() => openTrack(track)}>
+        <button
+          type="button"
+          className={`rl-card-check ${isSel ? "on" : ""}`}
+          title={t("radioLibrary.select")}
+          onClick={(e) => { e.stopPropagation(); toggleSelect(track.id); }}
+        >
+          <Icon name={isSel ? "check_circle" : "radio_button_unchecked"} size={20} filled={isSel} />
+        </button>
+        <div className="thumbnail-wrapper rl-thumb">
+          {track.has_cover ? (
+            // eslint-disable-next-line @next/next/no-img-element -- pochette servie par l'API
+            <img src={trackCoverUrl(track.id)} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+          ) : (
+            <Icon name="music_note" size={40} style={{ opacity: 0.25 }} />
+          )}
+          <span className="card-duration">{formatDuration(track.duration_seconds)}</span>
+        </div>
+        <div className="card-content">
+          <h4 className="card-title" title={track.title}>{track.title}</h4>
+          <div className="card-meta-row">
+            <span className="rl-card-artist">{track.artist || t("radioLibrary.unknownArtist")}</span>
+          </div>
+          {track.tags.length > 0 && (
+            <div className="rl-card-tags">
+              {track.tags.slice(0, 3).map((tg) => <span key={tg} className="rl-card-tag">{tg}</span>)}
+              {track.tags.length > 3 && <span className="rl-card-tag">+{track.tags.length - 3}</span>}
+            </div>
+          )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
-  const coverThumb = (coverTrackId: number | null, fallbackIcon: string) => (
-    <div className="thumbnail-wrapper" style={{ position: "relative", aspectRatio: "1 / 1", paddingTop: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-surface-elevated)" }}>
-      {coverTrackId != null ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={trackCoverUrl(coverTrackId)} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-      ) : (
-        <Icon name={fallbackIcon} size={40} style={{ opacity: 0.25 }} />
-      )}
+  // Ligne cliquable de la barre latérale (filtre).
+  const navItem = (active: boolean, icon: string, label: string, count: number | null, onClick: () => void, extra?: React.ReactNode) => (
+    <div className={`rl-nav-item ${active ? "active" : ""}`} onClick={onClick}>
+      <Icon name={icon} size={16} />
+      <span className="rl-nav-label" title={label}>{label}</span>
+      {count != null && <span className="rl-nav-count">{count}</span>}
+      {extra}
     </div>
   );
 
   return (
-    <div className="library-container">
+    <div className="radio-lib">
       {toast && <div className={`toast ${toast.type}`}><span>{toast.message}</span></div>}
 
-      <div style={{ marginBottom: "12px" }}>
-        <h2 style={{ fontSize: "1.4rem", fontWeight: 800, margin: "0 0 4px" }}>{t("radioLibrary.title")}</h2>
-        <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0 }}>{t("radioLibrary.subtitle")}</p>
-      </div>
+      {/* ==================== BARRE LATÉRALE ==================== */}
+      <aside className="radio-lib-sidebar">
+        <div className="rl-sidebar-head">
+          <div>
+            <h2 className="rl-title">{t("radioLibrary.title")}</h2>
+            <p className="rl-subtitle">{t("radioLibrary.overviewSubtitle")}</p>
+          </div>
+          <button type="button" className="btn btn-primary rl-import-btn" onClick={() => setImportOpen(true)}>
+            <Icon name="cloud_upload" size={16} /> {t("radioLibrary.importButton")}
+          </button>
+        </div>
 
-      {/* Sélecteur de vue (3 vues séparées, réf. D7) */}
-      <div className="view-toggle" style={{ marginBottom: "16px", flexWrap: "wrap" }}>
-        <button type="button" className={`view-btn ${view === "library" ? "active" : ""}`} onClick={() => setView("library")}>{t("radioLibrary.viewLibrary")}</button>
-        <button type="button" className={`view-btn ${view === "browse" ? "active" : ""}`} onClick={() => setView("browse")}>{t("radioLibrary.viewBrowse")}</button>
-        <button type="button" className={`view-btn ${view === "tags" ? "active" : ""}`} onClick={() => setView("tags")}>{t("radioLibrary.viewTags")}</button>
-      </div>
+        <input
+          type="text" className="search-input rl-search"
+          placeholder={t("radioLibrary.searchPlaceholder")}
+          value={search} onChange={(e) => setSearch(e.target.value)}
+        />
 
-      {/* ==================== VUE MORCEAUX & PLAYLISTS ==================== */}
-      {view === "library" && (
-        <>
-          {/* --- Playlists --- */}
-          <h3 style={{ fontSize: "0.85rem", color: "var(--accent-primary)", margin: "0 0 12px" }}>{t("radioLibrary.playlistsTitle")}</h3>
-          <div style={{ display: "flex", gap: "8px", marginBottom: "16px", maxWidth: "480px" }}>
+        <div className="rl-sidebar-scroll">
+          {navItem(filter === null, "library_music", t("radioLibrary.allTracks"), tracks.length, () => setFilter(null))}
+
+          {/* Playlists */}
+          <div className="rl-section-head">
+            <span>{t("radioLibrary.playlistsTitle")}</span>
+            <span className="rl-nav-count">{playlists.length}</span>
+          </div>
+          <div className="rl-create-row">
             <input type="text" className="form-control" placeholder={t("radioLibrary.newPlaylistPlaceholder")} value={newPlaylistName}
               onChange={(e) => setNewPlaylistName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") createPlaylist(); }} />
-            <button type="button" className="btn btn-primary" onClick={createPlaylist} style={{ whiteSpace: "nowrap" }}>{t("radioLibrary.create")}</button>
+            <button type="button" className="btn btn-secondary" onClick={createPlaylist} title={t("radioLibrary.create")}><Icon name="add" size={16} /></button>
           </div>
           {playlists.length === 0 ? (
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "0 0 24px" }}>{t("radioLibrary.noPlaylists")}</p>
-          ) : (
-            <div className="videos-grid" style={{ marginBottom: "28px" }}>
-              {playlists.map((p) => (
-                <div key={p.id} className="video-card" onClick={() => openPlaylist(p.id)}>
-                  {coverThumb(p.cover_track_id, "queue_music")}
-                  <div className="card-content">
-                    <h4 className="card-title" title={p.name}>{p.name}</h4>
-                    <div className="card-meta-row" style={{ gap: "6px", flexWrap: "wrap" }}>
-                      {p.is_default && <span className="program-badge rpm" style={{ background: "var(--accent-primary)" }}>{t("radioLibrary.defaultBadge")}</span>}
-                      <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
-                        {t("radioLibrary.itemsInPlaylist", { count: p.item_count })} · {formatDuration(p.total_duration_seconds)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <p className="rl-empty-note">{t("radioLibrary.noPlaylists")}</p>
+          ) : playlists.map((p) => (
+            <div key={p.id} className="rl-nav-item" onClick={() => openPlaylist(p.id)}>
+              <Icon name={p.is_default ? "star" : "queue_music"} size={16} filled={p.is_default} />
+              <span className="rl-nav-label" title={p.name}>{p.name}</span>
+              <span className="rl-nav-count">{p.item_count}</span>
             </div>
-          )}
+          ))}
 
-          {/* --- Import --- */}
-          <div className={`upload-zone ${dragActive ? "drag-active" : ""}`}
-            onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleFileDrop}
-            onClick={() => fileInputRef.current?.click()}>
-            <input ref={fileInputRef} type="file" accept={uploadMode === "zip" ? ".zip" : "audio/*"} multiple={uploadMode === "files"}
-              style={{ display: "none" }} onChange={(e) => startFilesUpload(e.target.files)} />
-            <div className="view-toggle" onClick={(e) => e.stopPropagation()} style={{ marginBottom: "8px" }}>
-              <button type="button" className={`view-btn ${uploadMode === "files" ? "active" : ""}`} onClick={() => setUploadMode("files")}>{t("radioLibrary.chooseFiles")}</button>
-              <button type="button" className={`view-btn ${uploadMode === "zip" ? "active" : ""}`} onClick={() => setUploadMode("zip")}>{t("radioLibrary.chooseZip")}</button>
-            </div>
-            <Icon name="cloud_upload" size={48} className="upload-icon" />
-            <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: "8px 0 4px" }}>{t("radioLibrary.importTitle")}</h3>
-            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: 0 }}>{t("radioLibrary.importHint")}</p>
+          {/* Tags */}
+          <div className="rl-section-head">
+            <span>{t("radioLibrary.tagsTitle")}</span>
+            <span className="rl-nav-count">{tagsList.length}</span>
           </div>
-
-          {/* --- Recherche / filtre / compteur --- */}
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", margin: "20px 0 16px", flexWrap: "wrap" }}>
-            <input type="text" className="search-input" placeholder={t("radioLibrary.searchPlaceholder")} value={search}
-              onChange={(e) => setSearch(e.target.value)} style={{ flex: 1, minWidth: "200px" }} />
-            {filter && (
-              <button type="button" className="btn btn-secondary" onClick={() => setFilter(null)} style={{ whiteSpace: "nowrap" }}>
-                <Icon name="close" size={14} /> {t("radioLibrary.filteredBy", { value: filter.value })}
-              </button>
-            )}
-            {!loading && <span style={{ color: "var(--text-dim)", fontSize: "0.85rem", whiteSpace: "nowrap" }}>{t("radioLibrary.countLabel", { count: filteredTracks.length })}</span>}
-          </div>
-
-          {/* --- Grille morceaux --- */}
-          {loading ? (
-            <div style={{ display: "flex", justifyContent: "center", minHeight: "200px", alignItems: "center", color: "var(--text-muted)" }}>{t("radioLibrary.loading")}</div>
-          ) : tracks.length === 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "220px", color: "var(--text-muted)" }}>
-              <Icon name="radio" size={40} style={{ opacity: 0.25, marginBottom: "8px" }} />
-              <p style={{ margin: 0, fontWeight: 600 }}>{t("radioLibrary.empty")}</p>
-            </div>
-          ) : filteredTracks.length === 0 ? (
-            <div style={{ display: "flex", justifyContent: "center", minHeight: "160px", alignItems: "center", color: "var(--text-muted)" }}>{t("radioLibrary.noResults")}</div>
-          ) : (
-            <div className="videos-grid">{filteredTracks.map(trackCard)}</div>
-          )}
-        </>
-      )}
-
-      {/* ==================== VUE ARTISTES & ALBUMS ==================== */}
-      {view === "browse" && (
-        <>
-          <h3 style={{ fontSize: "0.85rem", color: "var(--accent-primary)", margin: "0 0 12px" }}>{t("radioLibrary.artistsTitle")}</h3>
-          {artists.length === 0 ? (
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "0 0 24px" }}>{t("radioLibrary.noArtists")}</p>
-          ) : (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "28px" }}>
-              {artists.map((a) => (
-                <button key={a.name} type="button" className="btn btn-secondary" onClick={() => applyFilter({ type: "artist", value: a.name })}>
-                  <Icon name="person" size={16} /> {a.name} <span style={{ color: "var(--text-dim)" }}>({a.track_count})</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <h3 style={{ fontSize: "0.85rem", color: "var(--accent-primary)", margin: "0 0 12px" }}>{t("radioLibrary.albumsTitle")}</h3>
-          {albums.length === 0 ? (
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: 0 }}>{t("radioLibrary.noAlbums")}</p>
-          ) : (
-            <div className="videos-grid">
-              {albums.map((al) => (
-                <div key={`${al.album_artist}—${al.album}`} className="video-card" onClick={() => applyFilter({ type: "album", value: al.album })}>
-                  {coverThumb(al.cover_track_id, "album")}
-                  <div className="card-content">
-                    <h4 className="card-title" title={al.album}>{al.album}</h4>
-                    <div className="card-meta-row">
-                      <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {al.album_artist || t("radioLibrary.unknownArtist")}{al.year ? ` · ${al.year}` : ""}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ==================== VUE TAGS & GENRES ==================== */}
-      {view === "tags" && (
-        <>
-          <h3 style={{ fontSize: "0.85rem", color: "var(--accent-primary)", margin: "0 0 12px" }}>{t("radioLibrary.genresTitle")}</h3>
-          {genres.length === 0 ? (
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "0 0 24px" }}>{t("radioLibrary.noGenres")}</p>
-          ) : (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "28px" }}>
-              {genres.map((g) => (
-                <button key={g.name} type="button" className="btn btn-secondary" onClick={() => applyFilter({ type: "genre", value: g.name })}>
-                  <Icon name="label" size={16} /> {g.name} <span style={{ color: "var(--text-dim)" }}>({g.count})</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <h3 style={{ fontSize: "0.85rem", color: "var(--accent-primary)", margin: "0 0 12px" }}>{t("radioLibrary.tagsTitle")}</h3>
-          <div style={{ display: "flex", gap: "8px", marginBottom: "16px", maxWidth: "480px" }}>
+          <div className="rl-create-row">
             <input type="text" className="form-control" placeholder={t("radioLibrary.newTagPlaceholder")} value={newTagName}
               onChange={(e) => setNewTagName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") createTag(); }} />
-            <button type="button" className="btn btn-primary" onClick={createTag} style={{ whiteSpace: "nowrap" }}>{t("radioLibrary.create")}</button>
+            <button type="button" className="btn btn-secondary" onClick={createTag} title={t("radioLibrary.create")}><Icon name="add" size={16} /></button>
           </div>
           {tagsList.length === 0 ? (
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: 0 }}>{t("radioLibrary.noTags")}</p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxWidth: "560px" }}>
-              {tagsList.map((tag) => (
-                <div key={tag.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", background: "var(--bg-surface-elevated)", borderRadius: "8px" }}>
-                  <button type="button" onClick={() => applyFilter({ type: "tag", value: tag.name })}
-                    style={{ flex: 1, textAlign: "left", background: "none", border: "none", color: "var(--text-main)", cursor: "pointer", fontWeight: 600 }}>
-                    {tag.name} <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>({tag.track_count})</span>
-                  </button>
-                  <button type="button" className="btn btn-secondary" onClick={() => renameTag(tag)}><Icon name="edit" size={14} /></button>
-                  <button type="button" className="btn btn-danger" onClick={() => deleteTag(tag)}><Icon name="delete" size={14} /></button>
-                </div>
-              ))}
+            <p className="rl-empty-note">{t("radioLibrary.noTags")}</p>
+          ) : tagsList.map((tag) => (
+            <div key={tag.id} className={`rl-nav-item ${filter?.type === "tag" && filter.value === tag.name ? "active" : ""}`} onClick={() => applyFilter({ type: "tag", value: tag.name })}>
+              <Icon name="label" size={16} />
+              <span className="rl-nav-label" title={tag.name}>{tag.name}</span>
+              <span className="rl-nav-count">{tag.track_count}</span>
+              <span className="rl-nav-actions">
+                <button type="button" title={t("radioLibrary.renameTag")} onClick={(e) => { e.stopPropagation(); renameTag(tag); }}><Icon name="edit" size={13} /></button>
+                <button type="button" title={t("radioLibrary.deleteTag")} onClick={(e) => { e.stopPropagation(); deleteTag(tag); }}><Icon name="delete" size={13} /></button>
+              </span>
             </div>
+          ))}
+
+          {/* Genres */}
+          {genres.length > 0 && (
+            <>
+              <div className="rl-section-head"><span>{t("radioLibrary.genresTitle")}</span><span className="rl-nav-count">{genres.length}</span></div>
+              {genres.map((g) => navItem(
+                filter?.type === "genre" && filter.value === g.name, "graphic_eq", g.name, g.count,
+                () => applyFilter({ type: "genre", value: g.name }),
+              ))}
+            </>
           )}
-        </>
+
+          {/* Artistes (repliable) */}
+          {artists.length > 0 && (
+            <>
+              <div className="rl-section-head rl-collapsible" onClick={() => setArtistsOpen((o) => !o)}>
+                <Icon name={artistsOpen ? "expand_more" : "chevron_right"} size={16} />
+                <span>{t("radioLibrary.artistsTitle")}</span>
+                <span className="rl-nav-count">{artists.length}</span>
+              </div>
+              {artistsOpen && artists.map((a) => navItem(
+                filter?.type === "artist" && filter.value === a.name, "person", a.name, a.track_count,
+                () => applyFilter({ type: "artist", value: a.name }),
+              ))}
+            </>
+          )}
+        </div>
+      </aside>
+
+      {/* ==================== ZONE PRINCIPALE ==================== */}
+      <main className="radio-lib-main"
+        onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleFileDrop}>
+        {dragActive && (
+          <div className="rl-drop-overlay"><Icon name="cloud_upload" size={40} /><span>{t("radioLibrary.dropHere")}</span></div>
+        )}
+
+        {selected.size === 0 ? (
+          <div className="rl-toolbar">
+            <div className="rl-filter-chip">
+              <Icon name={filter ? (filter.type === "tag" ? "label" : filter.type === "genre" ? "graphic_eq" : "person") : "library_music"} size={16} />
+              <span>{filterLabel}</span>
+              {filter && <button type="button" onClick={() => setFilter(null)} title={t("radioLibrary.clearFilter")}><Icon name="close" size={14} /></button>}
+            </div>
+            <span className="rl-count">{t("radioLibrary.countLabel", { count: filteredTracks.length })}</span>
+            <div className="rl-toolbar-spacer" />
+            {filteredTracks.length > 0 && (
+              <button type="button" className="btn btn-secondary" onClick={toggleSelectAllVisible}>
+                <Icon name="checklist" size={16} /> {allVisibleSelected ? t("radioLibrary.deselectAll") : t("radioLibrary.selectAll")}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="rl-selection-bar">
+            <button type="button" className="rl-sel-close" onClick={clearSelection} title={t("radioLibrary.clearSelection")}><Icon name="close" size={18} /></button>
+            <span className="rl-sel-count">{t("radioLibrary.selectionCount", { count: selected.size })}</span>
+            <div className="rl-toolbar-spacer" />
+            <div className="rl-bulk-wrap">
+              <button type="button" className="btn btn-secondary" onClick={() => setBulkMenu(bulkMenu === "tag" ? null : "tag")}><Icon name="label" size={16} /> {t("radioLibrary.bulkTag")}</button>
+              {bulkMenu === "tag" && (
+                <div className="rl-popover" onClick={(e) => e.stopPropagation()}>
+                  <div className="rl-popover-title">{t("radioLibrary.bulkTagTitle")}</div>
+                  {tagsList.length === 0 ? <p className="rl-empty-note">{t("radioLibrary.noTags")}</p> : tagsList.map((tag) => {
+                    const st = selectionTagState(tag.name);
+                    return (
+                      <button key={tag.id} type="button" className="rl-popover-item" onClick={() => applyTagToSelection(tag.name, st !== "all")}>
+                        <Icon name={st === "all" ? "check_box" : st === "some" ? "indeterminate_check_box" : "check_box_outline_blank"} size={18} />
+                        <span>{tag.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="rl-bulk-wrap">
+              <button type="button" className="btn btn-secondary" onClick={() => setBulkMenu(bulkMenu === "playlist" ? null : "playlist")}><Icon name="playlist_add" size={16} /> {t("radioLibrary.bulkAddToPlaylist")}</button>
+              {bulkMenu === "playlist" && (
+                <div className="rl-popover" onClick={(e) => e.stopPropagation()}>
+                  <div className="rl-popover-title">{t("radioLibrary.addToPlaylistTitle")}</div>
+                  {playlists.length === 0 ? <p className="rl-empty-note">{t("radioLibrary.noPlaylists")}</p> : playlists.map((p) => (
+                    <button key={p.id} type="button" className="rl-popover-item" onClick={() => addSelectionToPlaylist(p.id)}>
+                      <Icon name={p.is_default ? "star" : "queue_music"} size={16} filled={p.is_default} />
+                      <span>{p.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button type="button" className="btn btn-danger" onClick={() => setBulkDeleteOpen(true)}><Icon name="delete" size={16} /> {t("radioLibrary.delete")}</button>
+          </div>
+        )}
+
+        {/* Grille */}
+        {loading ? (
+          <div className="rl-center-note">{t("radioLibrary.loading")}</div>
+        ) : tracks.length === 0 ? (
+          <div className="rl-empty-state">
+            <Icon name="radio" size={40} style={{ opacity: 0.25, marginBottom: "8px" }} />
+            <p style={{ margin: 0, fontWeight: 600 }}>{t("radioLibrary.empty")}</p>
+            <button type="button" className="btn btn-primary" style={{ marginTop: "12px" }} onClick={() => setImportOpen(true)}><Icon name="cloud_upload" size={16} /> {t("radioLibrary.importButton")}</button>
+          </div>
+        ) : filteredTracks.length === 0 ? (
+          <div className="rl-center-note">{t("radioLibrary.noResults")}</div>
+        ) : (
+          <div className="videos-grid rl-grid">{filteredTracks.map(trackCard)}</div>
+        )}
+      </main>
+
+      {/* Ferme les popovers en cliquant ailleurs */}
+      {bulkMenu && <div className="rl-popover-scrim" onClick={() => setBulkMenu(null)} />}
+
+      {/* ==================== MODALE : import ==================== */}
+      {importOpen && (
+        <div className="modal-overlay" onClick={() => setImportOpen(false)}>
+          <div className="modal-content" style={{ maxWidth: "520px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="drawer-header" style={{ padding: 0, marginBottom: "12px" }}>
+              <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0 }}>{t("radioLibrary.importTitle")}</h3>
+              <button className="close-btn" onClick={() => setImportOpen(false)}><Icon name="close" size={20} /></button>
+            </div>
+            <div className={`upload-zone ${dragActive ? "drag-active" : ""}`}
+              onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleFileDrop}
+              onClick={() => fileInputRef.current?.click()}>
+              <input ref={fileInputRef} type="file" accept={uploadMode === "zip" ? ".zip" : "audio/*"} multiple={uploadMode === "files"}
+                style={{ display: "none" }} onChange={(e) => startFilesUpload(e.target.files)} />
+              <div className="view-toggle" onClick={(e) => e.stopPropagation()} style={{ marginBottom: "8px" }}>
+                <button type="button" className={`view-btn ${uploadMode === "files" ? "active" : ""}`} onClick={() => setUploadMode("files")}>{t("radioLibrary.chooseFiles")}</button>
+                <button type="button" className={`view-btn ${uploadMode === "zip" ? "active" : ""}`} onClick={() => setUploadMode("zip")}>{t("radioLibrary.chooseZip")}</button>
+              </div>
+              <Icon name="cloud_upload" size={48} className="upload-icon" />
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: "8px 0 0" }}>{t("radioLibrary.importHint")}</p>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ==================== DRAWER : édition d'un morceau ==================== */}
-      {selected && (
+      {selectedTrack && (
         <>
-          <div className="detail-drawer-overlay" onClick={() => setSelected(null)} />
+          <div className="detail-drawer-overlay" onClick={() => setSelectedTrack(null)} />
           <div className="detail-drawer">
             <div className="drawer-header">
               <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", maxWidth: "80%" }}>{t("radioLibrary.editTitle")}</h3>
-              <button className="close-btn" onClick={() => setSelected(null)}><Icon name="close" size={20} /></button>
+              <button className="close-btn" onClick={() => setSelectedTrack(null)}><Icon name="close" size={20} /></button>
             </div>
             <div className="drawer-body">
               <div style={{ display: "flex", gap: "16px", alignItems: "flex-start", marginBottom: "16px" }}>
                 <div style={{ width: "120px", height: "120px", flexShrink: 0, borderRadius: "8px", overflow: "hidden", background: "var(--bg-surface-elevated)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {selected.has_cover ? (
+                  {selectedTrack.has_cover ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={trackCoverUrl(selected.id)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <img src={trackCoverUrl(selectedTrack.id)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   ) : <Icon name="music_note" size={36} style={{ opacity: 0.25 }} />}
                 </div>
                 <div style={{ flex: 1 }}>
@@ -674,12 +825,32 @@ export default function RadioLibraryPage() {
                 </div>
                 <div className="form-group"><label className="form-label">{t("radioLibrary.fieldGenre")}</label>
                   <input type="text" className="form-control" value={form.genre} onChange={(e) => setForm({ ...form, genre: e.target.value })} /></div>
-                <div className="form-group"><label className="form-label">{t("radioLibrary.fieldTags")}</label>
-                  <input type="text" className="form-control" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder="ambiance, énergique" />
-                  <span style={{ fontSize: "0.75rem", color: "var(--text-dim)" }}>{t("radioLibrary.tagsHint")}</span></div>
+
+                {/* Tags en chips cliquables */}
+                <div className="form-group">
+                  <label className="form-label">{t("radioLibrary.fieldTags")}</label>
+                  <div className="rl-chips">
+                    {Array.from(new Set([...tagsList.map((tg) => tg.name), ...drawerTags])).sort((a, b) => a.localeCompare(b)).map((name) => {
+                      const on = drawerTags.includes(name);
+                      return (
+                        <button key={name} type="button" className={`rl-chip ${on ? "on" : ""}`} onClick={() => toggleDrawerTag(name)}>
+                          {on && <Icon name="check" size={13} />} {name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="rl-chip-add">
+                    <input type="text" className="form-control" placeholder={t("radioLibrary.addTagPlaceholder")} value={newChip}
+                      onChange={(e) => setNewChip(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addChip(); } }} />
+                    <button type="button" className="btn btn-secondary" onClick={addChip}><Icon name="add" size={16} /></button>
+                  </div>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-dim)" }}>{t("radioLibrary.tagsChipsHint")}</span>
+                </div>
+
                 <div className="drawer-actions">
                   <button type="submit" className="btn btn-primary" style={{ flex: 1, height: "48px" }} disabled={savingDrawer}>{savingDrawer ? t("radioLibrary.saving") : t("radioLibrary.save")}</button>
-                  <button type="button" className="btn btn-danger" style={{ height: "48px" }} onClick={() => setToDelete(selected)}>{t("radioLibrary.delete")}</button>
+                  <button type="button" className="btn btn-danger" style={{ height: "48px" }} onClick={() => setToDelete(selectedTrack)}>{t("radioLibrary.delete")}</button>
                 </div>
               </form>
             </div>
@@ -707,38 +878,51 @@ export default function RadioLibraryPage() {
                 {editingPlaylist.is_default ? t("radioLibrary.unsetDefault") : t("radioLibrary.setDefault")}
               </button>
 
-              <h4 style={{ fontSize: "0.85rem", fontWeight: 800, borderBottom: "1px solid var(--border-color)", paddingBottom: "6px", margin: "0 0 8px" }}>
+              <h4 className="rl-drawer-subhead">
                 {t("radioLibrary.itemsInPlaylist", { count: editingPlaylist.items.length })}
+                {editingPlaylist.items.length > 1 && <span className="rl-dnd-hint"> · {t("radioLibrary.dragHint")}</span>}
               </h4>
               {editingPlaylist.items.length === 0 ? (
                 <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>{t("radioLibrary.emptyPlaylist")}</p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "16px" }}>
                   {editingPlaylist.items.map((item, index) => (
-                    <div key={item.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 8px", background: "var(--bg-surface-elevated)", borderRadius: "6px" }}>
+                    <div key={item.id}
+                      className={`rl-pl-item ${dragOverIndex === index ? "drag-over" : ""}`}
+                      draggable
+                      onDragStart={() => { dragIndexRef.current = index; }}
+                      onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
+                      onDragLeave={() => setDragOverIndex((cur) => (cur === index ? null : cur))}
+                      onDrop={(e) => { e.preventDefault(); handleItemDrop(index); }}
+                      onDragEnd={() => { dragIndexRef.current = null; setDragOverIndex(null); }}
+                    >
+                      <Icon name="drag_indicator" size={16} className="rl-drag-handle" />
                       <span style={{ color: "var(--text-dim)", fontSize: "0.8rem", width: "20px" }}>{index + 1}</span>
                       <span style={{ flex: 1, fontSize: "0.9rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {item.track.title}<span style={{ color: "var(--text-muted)" }}> — {item.track.artist || t("radioLibrary.unknownArtist")}</span>
                       </span>
-                      <button type="button" className="btn btn-secondary" title={t("radioLibrary.moveUp")} disabled={index === 0} onClick={() => reorderItem(index, -1)}><Icon name="arrow_upward" size={14} /></button>
-                      <button type="button" className="btn btn-secondary" title={t("radioLibrary.moveDown")} disabled={index === editingPlaylist.items.length - 1} onClick={() => reorderItem(index, 1)}><Icon name="arrow_downward" size={14} /></button>
                       <button type="button" className="btn btn-danger" title={t("radioLibrary.remove")} onClick={() => removeFromPlaylist(item.track.id)}><Icon name="close" size={14} /></button>
                     </div>
                   ))}
                 </div>
               )}
 
-              <h4 style={{ fontSize: "0.85rem", fontWeight: 800, borderBottom: "1px solid var(--border-color)", paddingBottom: "6px", margin: "16px 0 8px" }}>{t("radioLibrary.addTracksTitle")}</h4>
+              <h4 className="rl-drawer-subhead" style={{ marginTop: "16px" }}>{t("radioLibrary.addTracksTitle")}</h4>
               <input type="text" className="form-control" placeholder={t("radioLibrary.addTracksSearch")} value={addTrackSearch} onChange={(e) => setAddTrackSearch(e.target.value)} style={{ marginBottom: "8px" }} />
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxHeight: "260px", overflowY: "auto" }}>
-                {addableTracks.slice(0, 60).map((tr) => (
-                  <div key={tr.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 8px", background: "var(--bg-surface-elevated)", borderRadius: "6px" }}>
-                    <span style={{ flex: 1, fontSize: "0.9rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {tr.title}<span style={{ color: "var(--text-muted)" }}> — {tr.artist || t("radioLibrary.unknownArtist")}</span>
-                    </span>
-                    <button type="button" className="btn btn-secondary" onClick={() => addToPlaylist(tr.id)}><Icon name="add" size={14} /> {t("radioLibrary.add")}</button>
-                  </div>
-                ))}
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxHeight: "280px", overflowY: "auto" }}>
+                {addableTracks.map((tr) => {
+                  const already = editingPlaylist.items.some((i) => i.track.id === tr.id);
+                  return (
+                    <div key={tr.id} className="rl-add-row">
+                      <span style={{ flex: 1, fontSize: "0.9rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {tr.title}<span style={{ color: "var(--text-muted)" }}> — {tr.artist || t("radioLibrary.unknownArtist")}</span>
+                      </span>
+                      <button type="button" className="btn btn-secondary" disabled={already} onClick={() => addToPlaylist(tr.id)}>
+                        <Icon name={already ? "check" : "add"} size={14} /> {already ? t("radioLibrary.added") : t("radioLibrary.add")}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="drawer-actions" style={{ marginTop: "16px" }}>
@@ -761,6 +945,18 @@ export default function RadioLibraryPage() {
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setToDelete(null)}>{t("radioLibrary.cancel")}</button>
               <button type="button" className="btn btn-primary" style={{ backgroundColor: "var(--accent-error)" }} onClick={confirmDeleteTrack}>{t("radioLibrary.confirmDelete")}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {bulkDeleteOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0 }}>{t("radioLibrary.bulkDeleteTitle", { count: selected.size })}</h3>
+            <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>{t("radioLibrary.bulkDeleteText")}</p>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setBulkDeleteOpen(false)}>{t("radioLibrary.cancel")}</button>
+              <button type="button" className="btn btn-primary" style={{ backgroundColor: "var(--accent-error)" }} onClick={confirmBulkDelete}>{t("radioLibrary.confirmDelete")}</button>
             </div>
           </div>
         </div>
