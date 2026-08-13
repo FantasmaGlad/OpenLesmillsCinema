@@ -689,6 +689,51 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* Polish UX téléphone (réf. retour utilisateur "interface téléphone trop
+   compacte") pour les pages sans traitement mobile dédié (bibliothèque,
+   cours audio, fonds, paramètres, logs...) qui tournaient jusqu'ici dans la
+   coquille mobile sans aucun ajustement de leur contenu. Même seuil que le
+   hook useIsMobile() (768px) pour rester cohérent avec la bascule vers la
+   coquille mobile — pas une refonte, juste plus d'air et des cibles
+   tactiles plus généreuses sur ce qui existe déjà. */
+@media (max-width: 768px) {
+  /* Champs de largeur fixe pensés pour desktop : fluides sur mobile plutôt
+     que de forcer une largeur qui dépasse ou laisse un vide. */
+  .search-input {
+    width: 100%;
+  }
+
+  /* Cellules plus denses : plus de contenu tient avant de devoir défiler
+     horizontalement (cf. .table-wrapper, overflow-x: auto). */
+  .videos-table th,
+  .videos-table td {
+    padding: 10px 12px;
+    font-size: 0.85rem;
+  }
+
+  /* Garde-fou générique : certaines modales fixent leur largeur en style
+     inline (ex. la modale d'import radio, 520px) qui l'emporte sur le
+     max-width: 90vw de la classe de base — sans ce filet, elles
+     déborderaient sur un écran plus étroit que cette largeur fixe. */
+  .modal-content {
+    width: auto !important;
+    max-width: calc(100vw - 32px) !important;
+  }
+
+  /* Cibles tactiles confortables (~44px, repère Apple/Google) sur les
+     champs et boutons des pages sans layout mobile dédié. */
+  .form-control,
+  .btn,
+  .view-btn {
+    min-height: 44px;
+  }
+
+  input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+  }
+}
+
 /* Video Library Specific Styles */
 .library-container {
   display: flex;
@@ -962,7 +1007,8 @@ h1, h2, h3, h4, h5, h6 {
   background: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .videos-table {
@@ -1508,6 +1554,13 @@ h1, h2, h3, h4, h5, h6 {
 .launch-row {
   display: flex;
   gap: 12px;
+  flex-wrap: wrap;
+}
+/* Un <select> flex:1 sans min-width:0 résiste à sa réduction sous sa largeur
+   intrinsèque (bug de mobile réel constaté : le bouton "Lancer" débordait
+   hors écran sur un téléphone). */
+.launch-row > select {
+  min-width: 0;
 }
 
 /* ============================================================
@@ -3078,6 +3131,11 @@ h1, h2, h3, h4, h5, h6 {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  /* Réf. retour utilisateur "interface téléphone trop compacte" : les pages
+     sans traitement mobile dédié (bibliothèque, paramètres, logs...)
+     touchaient les bords de l'écran, aucune respiration nulle part. */
+  padding: 16px;
+  gap: 16px;
 }
 
 .mobile-drawer-overlay {
