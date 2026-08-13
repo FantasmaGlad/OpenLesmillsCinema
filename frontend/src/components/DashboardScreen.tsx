@@ -592,40 +592,46 @@ export default function DashboardScreen({ channel }: Props) {
         )}
       </div>
 
-      <div className="live-block">
-        <div className="live-header">
-          <h3>{t("dashboard.upcomingTitle")}</h3>
-          <a href={`/schedule/?channel=${channel}`} className="status-pill" style={{ textDecoration: "none" }}>
-            {t("dashboard.viewSchedule")}
-          </a>
-        </div>
-        {upcoming.length === 0 ? (
-          <p className="live-empty">{t("dashboard.noUpcoming")}</p>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {upcoming.map((o, idx) => (
-              <div
-                key={`${o.schedule_id}-${idx}`}
-                className="olc-card-hover"
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "10px 12px",
-                  background: "var(--bg-surface-elevated)",
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--border-color)",
-                }}
-              >
-                <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>{o.title ?? t("dashboard.courseFallback")}</span>
-                <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", fontVariantNumeric: "tabular-nums" }}>
-                  {new Date(o.run_at).toLocaleString(language === "fr" ? "fr-FR" : "en-US", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                </span>
-              </div>
-            ))}
+      {/* Planning "à venir" : n'a de sens qu'en mode kiosk (la programmation
+          pilote l'écran) — sans objet en mode cinéma (libre-service), donc
+          masqué comme les autres blocs kiosk-only ci-dessous (réf. retour
+          utilisateur "ne pas afficher Prochainement en sortie cinéma"). */}
+      {!channelCinema && (
+        <div className="live-block">
+          <div className="live-header">
+            <h3>{t("dashboard.upcomingTitle")}</h3>
+            <a href={`/schedule/?channel=${channel}`} className="status-pill" style={{ textDecoration: "none" }}>
+              {t("dashboard.viewSchedule")}
+            </a>
           </div>
-        )}
-      </div>
+          {upcoming.length === 0 ? (
+            <p className="live-empty">{t("dashboard.noUpcoming")}</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {upcoming.map((o, idx) => (
+                <div
+                  key={`${o.schedule_id}-${idx}`}
+                  className="olc-card-hover"
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "10px 12px",
+                    background: "var(--bg-surface-elevated)",
+                    borderRadius: "var(--radius-md)",
+                    border: "1px solid var(--border-color)",
+                  }}
+                >
+                  <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>{o.title ?? t("dashboard.courseFallback")}</span>
+                  <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", fontVariantNumeric: "tabular-nums" }}>
+                    {new Date(o.run_at).toLocaleString(language === "fr" ? "fr-FR" : "en-US", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Raccourci mode coach : pilote l'écran kiosk, sans objet en mode
           cinéma (l'écran affiche le libre-service) — masqué plutôt que juste
