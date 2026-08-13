@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import psutil
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -189,6 +190,23 @@ def get_storage() -> dict[str, Any]:
         "used_percent": round(usage.used / usage.total * 100, 1) if usage.total else 0.0,
         "app_bytes": app_bytes,
         "path": str(probe),
+    }
+
+
+@router.get("/system")
+def get_system_usage() -> dict[str, Any]:
+    """Charge CPU et RAM (réf. mission "supervision cpu/ram en plus du
+    stockage") : endpoint séparé de /storage (interval bloquant court pour
+    une mesure CPU instantanée fiable — psutil.cpu_percent(interval=None)
+    renverrait 0.0 sans appel préalable dans ce process — donc pas adapté à
+    être mélangé à une réponse par ailleurs bon marché comme /storage)."""
+    cpu_percent = psutil.cpu_percent(interval=0.1)
+    memory = psutil.virtual_memory()
+    return {
+        "cpu_percent": cpu_percent,
+        "memory_total_bytes": memory.total,
+        "memory_used_bytes": memory.total - memory.available,
+        "memory_percent": memory.percent,
     }
 
 

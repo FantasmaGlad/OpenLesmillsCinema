@@ -23,6 +23,45 @@ interface StorageData {
   path: string;
 }
 
+interface SystemUsageData {
+  cpu_percent: number;
+  memory_total_bytes: number;
+  memory_used_bytes: number;
+  memory_percent: number;
+}
+
+/** Jauge circulaire (réf. mission "supervision cpu/ram en plus du stockage,
+ * via des camemberts") : même technique conic-gradient déjà utilisée pour
+ * l'anneau de progression "à suivre" de l'écran cinéma (cinema/page.tsx) —
+ * aucune dépendance de graphique supplémentaire. */
+function UsageGauge({ label, percent, detail, size = 96 }: { label: string; percent: number; detail: string; size?: number }) {
+  const clamped = Math.max(0, Math.min(100, percent));
+  const color = clamped >= 90 ? "var(--accent-error)" : clamped >= 75 ? "#f59e0b" : "var(--accent-primary)";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", flex: "1 1 140px", minWidth: "140px" }}>
+      <div
+        style={{
+          position: "relative", width: size, height: size, borderRadius: "50%",
+          background: `conic-gradient(${color} ${clamped * 3.6}deg, var(--bg-surface-hover) 0deg)`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transition: "background 0.6s ease",
+        }}
+      >
+        <div style={{
+          width: size - 18, height: size - 18, borderRadius: "50%", background: "var(--bg-surface)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <span style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--text-main)", fontVariantNumeric: "tabular-nums" }}>
+            {clamped.toFixed(0)}%
+          </span>
+        </div>
+      </div>
+      <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--text-main)" }}>{label}</span>
+      <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", textAlign: "center" }}>{detail}</span>
+    </div>
+  );
+}
+
 /** Octets -> unité lisible (Go/Mo…), base 1024. */
 function formatBytes(bytes: number): string {
   if (!bytes || bytes < 0) return "0 o";
@@ -79,6 +118,7 @@ export default function SettingsPage() {
   const { theme, language, setTheme, setLanguage, t } = useAppSettings();
   const [data, setData] = useState<SettingsData | null>(null);
   const [storage, setStorage] = useState<StorageData | null>(null);
+  const [system, setSystem] = useState<SystemUsageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -118,6 +158,28 @@ export default function SettingsPage() {
     };
     fetchStorage();
     const id = setInterval(fetchStorage, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchSystem = () => {
+      fetch(getApiUrl("/settings/system"), { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((d) => {
+          if (!cancelled) setSystem(d);
+        })
+        .catch(() => {
+          if (!cancelled) setSystem(null);
+        });
+    };
+    fetchSystem();
+    // Intervalle plus court que le stockage (30s) : le CPU/RAM évoluent vite,
+    // un affichage "en direct" a besoin d'un rafraîchissement fréquent.
+    const id = setInterval(fetchSystem, 3000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -281,25 +343,33 @@ export default function SettingsPage() {
         </button>
       </form>
 
-      {/* ---- Stockage ---- */}
+      {/* ---- Supervision (stockage, CPU, RAM) ---- */}
       <section className="live-block">
-        <h3><Icon name="storage" size={18} /> {t("settingsPage.storageSection")}</h3>
-        {storage ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px" }}>
-              <span style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--text-main)" }}>
-                {t("settingsPage.storageFreeOfTotal", { free: formatBytes(storage.free_bytes), total: formatBytes(storage.total_bytes) })}
-              </span>
-              <span style={{ fontSize: "0.85rem", fontWeight: 700, fontVariantNumeric: "tabular-nums",
-                color: storage.used_percent >= 90 ? "var(--accent-error)" : storage.used_percent >= 75 ? "#f59e0b" : "var(--text-muted)" }}>
-                {t("settingsPage.storageUsedPercent", { percent: storage.used_percent })}
-              </span>
+        <h3><Icon name="monitor_heart" size={18} /> {t("settingsPage.monitoringSection")}</h3>
+        {storage || system ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "20px", justifyContent: "space-around" }}>
+              {storage && (
+                <UsageGauge
+                  label={t("settingsPage.storageSection")}
+                  percent={storage.used_percent}
+                  detail={t("settingsPage.storageFreeOfTotal", { free: formatBytes(storage.free_bytes), total: formatBytes(storage.total_bytes) })}
+                />
+              )}
+              {system && (
+                <UsageGauge label={t("settingsPage.cpuLabel")} percent={system.cpu_percent} detail={t("settingsPage.cpuHint")} />
+              )}
+              {system && (
+                <UsageGauge
+                  label={t("settingsPage.ramLabel")}
+                  percent={system.memory_percent}
+                  detail={t("settingsPage.ramDetail", { used: formatBytes(system.memory_used_bytes), total: formatBytes(system.memory_total_bytes) })}
+                />
+              )}
             </div>
-            <div style={{ height: "10px", borderRadius: "999px", background: "var(--bg-surface-hover)", overflow: "hidden" }}>
-              <div style={{ width: `${Math.min(100, storage.used_percent)}%`, height: "100%", borderRadius: "999px", transition: "width 0.4s ease",
-                background: storage.used_percent >= 90 ? "var(--accent-error)" : storage.used_percent >= 75 ? "#f59e0b" : "var(--accent-primary)" }} />
-            </div>
-            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{t("settingsPage.storageApp", { app: formatBytes(storage.app_bytes) })}</span>
+            {storage && (
+              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{t("settingsPage.storageApp", { app: formatBytes(storage.app_bytes) })}</span>
+            )}
             <p className="settings-hint">{t("settingsPage.storageHint")}</p>
           </div>
         ) : (
