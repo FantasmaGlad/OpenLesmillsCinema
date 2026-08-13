@@ -106,8 +106,12 @@ Ce que fait le script (réf. Lot 14 du plan de construction) :
     pour le décodage vidéo matériel, cf. Lot 0) ;
   - écrit la configuration de production dans
     /etc/openlesmillscinema/config.toml ;
-  - installe et démarre les services systemd (backend + kiosk Chromium) ;
-  - installe le script de contrôle `openlesmillscinema`.
+  - installe et démarre les services systemd (backend, kiosk Chromium,
+    garde audio, redirection du port 80 vers 8000) ;
+  - pose une règle sudoers restreinte (redémarrage des services + enveloppe
+    de désinstallation) pour les boutons de l'interface ;
+  - installe le script de contrôle `openlesmillscinema` et l'enveloppe de
+    désinstallation /usr/local/sbin/openlesmillscinema-uninstall.
 
 Le script est idempotent : le relancer après une resynchronisation ou
 un `git pull` met à jour proprement l'installation existante.
@@ -147,3 +151,20 @@ toujours (cf. Lot 0) :
     (section Logs).
   - `bash -n install.sh` permet de vérifier la syntaxe du script sans
     l'exécuter, si vous l'avez modifié.
+
+
+6. Désinstaller (remise à zéro complète)
+-------------------------------------------------------------
+
+Deux voies équivalentes :
+
+  - Interface web : Paramètres -> Zone de danger -> « Désinstaller »
+    (recopie de la phrase « DÉSINSTALLER » exigée).
+  - Ligne de commande, sur la machine cible :
+
+        cd ~/OpenLesmillsCinema
+        sudo ./install.sh --uninstall --purge --purge-data
+
+Retire les services systemd, la config /etc, l'application, le venv et
+TOUTES les données importées (vidéos, musiques, base). Les paquets système
+partagés (ffmpeg, redis, Node.js...) sont conservés. Action irréversible.

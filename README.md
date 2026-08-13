@@ -26,7 +26,7 @@ Ce document est écrit pour quiconque souhaite **comprendre, exploiter, modifier
 ### Stack technique
 
 - **Backend** : Python 3.11+, [FastAPI](https://fastapi.tiangolo.com/) + `uvicorn` (4 workers), [SQLAlchemy](https://www.sqlalchemy.org/), SQLite (`data/database.db`), Redis (bus d'état Pub/Sub, verrous distribués), `APScheduler` (planification), `watchdog` (surveillance des dossiers d'import), `ffmpeg` / VAAPI (décodage matériel Intel), Web Audio API (crossfade radio, côté navigateur).
-- **Frontend** : [Next.js](https://nextjs.org/) 16 (App Router), React 19, TypeScript, CSS Vanilla (CSS Modules + Design Tokens), PWA (`manifest.json`), WebSockets.
+- **Frontend** : [Next.js](https://nextjs.org/) 16 (App Router, export statique servi par le backend en production), React 19, TypeScript, CSS Vanilla (global + design tokens, **13 thèmes de couleurs** commutables à chaud via `:root[data-theme=…]`), PWA (`manifest.json`), WebSockets, glisser-déposer natif (HTML5), Web Audio API.
 - **Exploitation & Kiosque** : Debian 13 (Trixie), Chromium en mode kiosque (X11 / `xinit`), `systemd` (services backend, kiosque, garde audio), `avahi-daemon` (découverte mDNS).
 
 ### Développements locaux
@@ -34,18 +34,20 @@ Ce document est écrit pour quiconque souhaite **comprendre, exploiter, modifier
 **Préréquis** : Node.js ≥ 20, Python ≥ 3.11, Redis local actif.
 
 ```bash
-# 1. Backend (FastAPI + Redis)
+# 1. Backend (FastAPI + Redis) — port 8001 en dev (voir note ci-dessous)
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 redis-server &          # requis : bus d'état partagé
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 
 # 2. Frontend (Next.js)
 cd frontend
 npm install
 npm run dev             # accessible sur http://localhost:3000
 ```
+
+> **Quirk de dev (port)** : servi par `next dev` sur `:3000`, le frontend route ses appels API/WebSocket vers `localhost:8001` (cf. `getApiUrl`/`getWsUrl`) — d'où le backend sur **8001** en développement. Alternative sans ce décalage, pratique pour vérifier le rendu réel : `cd frontend && npm run build` (export statique dans `frontend/out`) puis lancer le backend sur `:8000` — il sert lui-même `frontend/out` à `/` (même origine `/api`), il suffit alors de naviguer sur `http://localhost:8000/<route>/`.
 
 **Validation rapide avant commit** :
 
@@ -149,9 +151,9 @@ Lorsqu'une programmation automatique (`scheduler`) doit démarrer alors qu'une l
 Sous-système musical « type Spotify » **totalement indépendant** des cours vidéo/audio coach (canal `radio` dédié, tables `radio_*`, gestionnaire d'état `radio_manager.py`) — bibliothèque, playlists, lecture continue, crossfade et rappels sonores. Cahier des charges complet, décisions et découpage en lots : [`docs/cahier-des-charges-radio.md`](docs/cahier-des-charges-radio.md).
 
 - **Surfaces** : `/radio` (écran du poste dédié — affichage + contrôles, ouvert à la main dans un navigateur, pas de service kiosk systemd), onglet admin « Radio » (télécommande à distance sur `/radio-remote`), « Piste Audio Radio » (bibliothèque sur `/radio-library`), « Rappels » (annonces sur `/radio-announcements`), et un 3ᵉ onglet « Radio » sur la page Planning (`/schedule/?channel=radio`).
-- **Bibliothèque** : import tous formats audio (transcodage automatique de ce que le navigateur ne lit pas), pochettes extraites (ID3) ou manuelles, navigation par artiste/album/tags.
+- **Bibliothèque** : import tous formats audio (transcodage automatique de ce que le navigateur ne lit pas), pochettes extraites (ID3) ou manuelles, navigation par artiste/album/tags. L'écran admin « Piste Audio Radio » (`/radio-library`) est une **vue d'ensemble** : barre latérale de filtres (playlists / tags / genres / artistes), grille à sélection multiple avec actions groupées (taguer, ajouter à une playlist), tags éditables en chips, éditeur de playlist en glisser-déposer.
 - **Lecture** : continue, file d'attente, lecture aléatoire, répétition (piste/playlist), **crossfade** (Web Audio API — deux `<audio>` routés dans un graphe `MediaElementAudioSourceNode → GainNode → destination`, fondu démarré côté client en avance sur la confirmation serveur).
-- **Rappels** : annonces de bienséance avec description, règles de déclenchement (toutes les N musiques / toutes les X minutes / à heures fixes / manuel), insertion en attente de fin de piste ou par fondu immédiat (« duck » — réutilise le même graphe Web Audio que le crossfade).
+- **Rappels** : annonces de bienséance avec description, règles de déclenchement (toutes les N musiques / toutes les X minutes / à heures fixes / manuel), insertion en attente de fin de piste ou par fondu immédiat (« duck » — réutilise le même graphe Web Audio que le crossfade). Chaque rappel est **normalisé en loudness à l'import** (`ffmpeg loudnorm` EBU R128, 2 passes, cible -10 LUFS) pour s'entendre au moins aussi fort que la musique. Écran d'admin dédié (`/radio-announcements`) : import, activation, règles, déclenchement manuel.
 - **24/7 & Planning** : une playlist marquée par défaut tourne en boucle en permanence ; auto-démarrage au boot (`radio_autostart_on_boot`) ; le Planning peut y superposer des fenêtres horaires récurrentes (option 24/7) qui reviennent automatiquement à l'ambiance par défaut en fin de fenêtre.
 - **Config** (`radio_dir`, `radio_covers_dir`, `radio_announcements_dir`, `radio_watch_dir`, `radio_volume_default`, `radio_crossfade_seconds`, `radio_announcement_duck_level`, `radio_announcement_fade_ms`, `radio_autostart_on_boot`) : voir `config.py` — dossiers unifiés sous `${REPO_DIR}/data` par `install.sh` comme le reste des médias.
 
@@ -164,6 +166,7 @@ Le mode **Audio Coach** permet de diffuser des cours audio (pistes vocales / mus
 - **Importation** : Support des fichiers MP3 individuellement ou par paquets ZIP.
 - **Fonds animés** : Boucles vidéo stockées dans `backend/data/backgrounds`, jouées en boucle infinie sans coupure.
 - **Minuteur d'enchaînement (`audio_chain_timer_seconds`)** : Délai de transition configurable entre deux pistes audio (modifiable depuis `/api/settings`).
+- **Lancement** : une playlist audio coach se lance depuis la page « Cours Audio » (`/audio`, actif uniquement quand le câblé est **déjà** en mode coach — sinon on passe d'abord par « Passer en mode coach » / `/coach`) ou directement depuis l'écran mobile `/coach`. Le raccourci autrefois présent sur le tableau de bord câblé a été déplacé ici.
 
 ---
 
@@ -196,6 +199,13 @@ sudo ./install.sh
 
 Pas de service dédié pour le canal Radio (arbitrage A5, cf. §5) : `/radio` s'ouvre à la main dans un navigateur, sur le même backend.
 
+### Autorisation sudo restreinte & désinstallation depuis l'interface
+
+`install.sh` écrit `/etc/sudoers.d/openlesmillscinema` autorisant **sans mot de passe, et uniquement**, deux actions déclenchées depuis l'admin :
+
+- le **redémarrage** des services (`systemctl restart`) — bouton « Réinitialisation complète » (Paramètres → Maintenance), qui recharge tous les écrans connectés puis relance backend + kiosque ;
+- l'enveloppe de **désinstallation** `/usr/local/sbin/openlesmillscinema-uninstall` — bouton « Désinstaller » (Paramètres → **Zone de danger**). L'enveloppe détache la remise à zéro via `systemd-run` (pour survivre à l'arrêt du service backend) puis exécute `install.sh --uninstall --purge --purge-data -y` : arrêt/suppression des services + config `/etc` + application + venv + **toutes les données** (les paquets `apt` partagés sont conservés). L'UI exige de recopier la phrase « DÉSINSTALLER » ; hors machine installée (poste de dev), l'endpoint refuse proprement.
+
 ---
 
 ## 8. Référence API HTTP & WebSockets
@@ -211,7 +221,7 @@ Pas de service dédié pour le canal Radio (arbitrage A5, cf. §5) : `/radio` s'
 | **Playlists Audio** | `/api/audio-playlists` | Playlists mixtes audio coach avec fonds |
 | **Planning** | `/api/schedule` | Programmateurs, occurrences et exceptions |
 | **Lecture** | `/api/playback` | Contrôle de la lecture (play, pause, seek, stop, reprise) |
-| **Paramètres** | `/api/settings` | Configuration dynamique, sortie vidéo et espace de stockage |
+| **Paramètres** | `/api/settings` | Configuration dynamique (lecture/thème/langue), sortie vidéo, espace de stockage (`/settings/storage`), réinitialisation complète (`POST /settings/system/reset`) et désinstallation machine (`POST /settings/system/uninstall`, phrase de confirmation requise) |
 | **Imports** | `/api/import-jobs` | Suivi des tâches d'importation en arrière-plan |
 | **Logs** | `/api/logs` | Consultation et téléchargement des journaux système |
 | **Radio — Bibliothèque** | `/api/radio` | Morceaux (CRUD, artistes/albums/tags), playlists radio, état du canal (`/api/radio/state`) |
@@ -258,7 +268,9 @@ rsync -a --delete --dry-run \
   --exclude='.git/' --exclude='data/' --exclude='backend/data/' --exclude='backend/.venv/' \
   --exclude='frontend/node_modules/' --exclude='frontend/.next/' --exclude='frontend/out/' \
   --exclude='__pycache__/' --exclude='*.pyc' --exclude='*.db*' --exclude='*.log' \
-  --exclude='.claude/' --exclude='AGENTS.md' --exclude='CLAUDE.md' \
+  --exclude='backend/.pytest_cache/' --exclude='VideoTest/' \
+  --exclude='.claude/' --exclude='.agents/' --exclude='.gemini/' \
+  --exclude='AGENTS.md' --exclude='CLAUDE.md' \
   ./ fanta@<WYSE_IP>:/home/fanta/OpenLesmillsCinema/
 # (puis sans --dry-run une fois vérifié)
 
