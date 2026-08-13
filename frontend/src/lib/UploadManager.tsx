@@ -50,14 +50,18 @@ const JOB_POLL_INTERVAL_MS = 1500;
 // Types
 // ---------------------------------------------------------------------------
 
-export type UploadKind = "video" | "background" | "audio_files" | "audio_zip" | "radio_files" | "radio_zip";
+export type UploadKind =
+  | "video" | "background" | "audio_files" | "audio_zip"
+  | "radio_files" | "radio_zip" | "radio_announcement_files";
 
 export interface PendingUploadSpec {
   kind: UploadKind;
   /** Fichier unique — vidéo, fond animé, ou archive ZIP (cours audio / radio). */
   file?: File;
-  /** Fichiers multiples — pistes MP3 d'un cours audio ("audio_files") ou
-   *  morceaux de la bibliothèque radio ("radio_files"). */
+  /** Fichiers multiples — pistes MP3 d'un cours audio ("audio_files"),
+   *  morceaux de la bibliothèque radio ("radio_files"), ou rappels importés
+   *  en lot ("radio_announcement_files", description auto depuis le nom de
+   *  fichier côté serveur). */
   files?: File[];
   title: string;
   program?: string | null;
@@ -120,6 +124,7 @@ const UPLOAD_ENDPOINTS: Record<UploadKind, string> = {
   audio_zip: "/audio/upload-zip",
   radio_files: "/radio/tracks/upload",
   radio_zip: "/radio/tracks/upload-zip",
+  radio_announcement_files: "/radio/announcements/upload-batch",
 };
 
 const STAGE_ICONS: Record<string, string> = {
@@ -152,7 +157,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
   const buildFormData = (task: UploadTask): FormData => {
     const formData = new FormData();
-    if (task.kind === "audio_files" || task.kind === "radio_files") {
+    if (task.kind === "audio_files" || task.kind === "radio_files" || task.kind === "radio_announcement_files") {
       (task.files ?? []).forEach((f) => formData.append("files", f));
     } else if (task.file) {
       formData.append("file", task.file);
@@ -357,6 +362,7 @@ const KIND_LABELS: Record<UploadKind, string> = {
   audio_zip: "Cours audio",
   radio_files: "Musique radio",
   radio_zip: "Musique radio",
+  radio_announcement_files: "Rappels radio",
 };
 
 function UploadFloatingPanel() {

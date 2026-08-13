@@ -91,6 +91,13 @@ export default function RadioScreenPage() {
   const crossfadingRef = useRef(false);
 
   const activeAnnouncementRef = useRef<{ id: number; mode: string } | null>(null);
+  // Fondu d'entrée/sortie du RAPPEL LUI-MÊME (réf. correctif "vitesse de fade
+  // réglable" — jusqu'ici seule la musique de fond était atténuée en mode
+  // duck, le gain du rappel restait fixé à 1). Le timeout de fin de fondu de
+  // sortie est annulable : un nouveau rappel qui démarrerait avant son
+  // expiration (dos-à-dos, écart < fadeMs) ne doit pas se faire couper par un
+  // pause() différé destiné à l'ancien.
+  const announcementFadeOutTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const duckSettingsRef = useRef({ level: DUCK_LEVEL_DEFAULT, fadeMs: DUCK_FADE_MS_DEFAULT });
   useEffect(() => {
     fetch(getApiUrl("/settings"), { cache: "no-store" })
@@ -228,19 +235,47 @@ export default function RadioScreenPage() {
       // qu'un rappel ne s'insère est annulé : on revient plein volume sur la
       // piste officiellement active, pour laisser la place au rappel.
       abortCrossfadeIfAny(data.volume);
+      // Un rappel qui démarre avant l'expiration du fondu de sortie du
+      // précédent (dos-à-dos) annule le pause() différé qui lui était destiné.
+      if (announcementFadeOutTimeoutRef.current) {
+        clearTimeout(announcementFadeOutTimeoutRef.current);
+        announcementFadeOutTimeoutRef.current = null;
+      }
       announcementAudio.src = getApiUrl(`/radio/announcements/${ann.id}/stream`);
       announcementAudio.load();
       if (unlocked) announcementAudio.play().catch(() => {});
+      const fadeMs = duckSettingsRef.current.fadeMs;
+      const annGain = announcementGainRef.current;
+      const ctx = audioCtxRef.current;
+      if (annGain && ctx) {
+        annGain.gain.cancelScheduledValues(ctx.currentTime);
+        annGain.gain.setValueAtTime(0, ctx.currentTime);
+        annGain.gain.linearRampToValueAtTime(1, ctx.currentTime + Math.max(0.001, fadeMs / 1000));
+      }
       if (ann.mode === "duck") {
-        rampGain(activeSlotRef.current, duckSettingsRef.current.level / 100, duckSettingsRef.current.fadeMs);
+        rampGain(activeSlotRef.current, duckSettingsRef.current.level / 100, fadeMs);
       }
     } else if (announcementAudio && !ann && wasAnnouncing) {
       activeAnnouncementRef.current = null;
-      announcementAudio.pause();
-      announcementAudio.removeAttribute("src");
-      announcementAudio.load();
+      const fadeMs = duckSettingsRef.current.fadeMs;
+      const annGain = announcementGainRef.current;
+      const ctx = audioCtxRef.current;
+      if (annGain && ctx) {
+        annGain.gain.cancelScheduledValues(ctx.currentTime);
+        annGain.gain.setValueAtTime(annGain.gain.value, ctx.currentTime);
+        annGain.gain.linearRampToValueAtTime(0, ctx.currentTime + Math.max(0.001, fadeMs / 1000));
+      }
+      // pause()/removeAttribute différés jusqu'à la fin du fondu de sortie,
+      // sinon l'audio se coupe net avant même que le gain ait eu le temps de
+      // descendre (Web Audio ne coupe pas la lecture, seulement le volume).
+      announcementFadeOutTimeoutRef.current = setTimeout(() => {
+        announcementAudio.pause();
+        announcementAudio.removeAttribute("src");
+        announcementAudio.load();
+        announcementFadeOutTimeoutRef.current = null;
+      }, fadeMs);
       if (wasAnnouncing.mode === "duck") {
-        rampGain(activeSlotRef.current, data.volume / 100, duckSettingsRef.current.fadeMs);
+        rampGain(activeSlotRef.current, data.volume / 100, fadeMs);
       }
     }
     const isDucking = activeAnnouncementRef.current?.mode === "duck";

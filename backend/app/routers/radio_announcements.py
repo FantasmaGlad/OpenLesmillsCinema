@@ -24,7 +24,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import RadioAnnouncement, RadioAnnouncementRule, RadioAnnouncementRuleType
 from app.utils.activity_log import log_activity
-from app.utils.radio_importer import import_radio_announcement
+from app.utils.executors import io_executor
+from app.utils.import_jobs import create_job, update_job
+from app.utils.radio_importer import import_radio_announcement, import_radio_announcements_from_files
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,10 @@ class RadioAnnouncementUpdate(BaseModel):
 
 class PlayNowInput(BaseModel):
     announcement_id: int | None = None
+
+
+class ImportJobAccepted(BaseModel):
+    job_id: str
 
 
 class RadioAnnouncementRuleResponse(BaseModel):
@@ -136,6 +142,41 @@ def upload_announcement(
         except OSError:
             pass
     return announcement
+
+
+def _run_announcements_import_job(job_id: str, tmp_dir: Path, temp_paths: list[str]) -> None:
+    try:
+        announcements = import_radio_announcements_from_files(temp_paths, job_id=job_id)
+        update_job(job_id, stage="done", result_id=announcements[0].id if announcements else None)
+    except Exception as e:
+        logger.error(f"Import de rappels (job {job_id}) échoué : {e}", exc_info=True)
+        update_job(job_id, stage="error", error=str(e))
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@router.post("/announcements/upload-batch", response_model=ImportJobAccepted, status_code=202)
+def upload_announcements_batch(files: List[UploadFile] = File(...)):
+    """Import groupé (plusieurs fichiers ou dossier entier, réf. correctif
+    "import de dossiers pour les rappels") : traité en arrière-plan comme les
+    morceaux — voir GET /api/import-jobs. Description dérivée automatiquement
+    du nom de chaque fichier (décision actée), pas de champ description ici."""
+    tmp_dir = Path(tempfile.mkdtemp(prefix="olmc_announcement_upload_"))
+    temp_paths = []
+    try:
+        for f in files:
+            dest = tmp_dir / Path(f.filename).name
+            with open(dest, "wb") as out:
+                shutil.copyfileobj(f.file, out)
+            temp_paths.append(str(dest))
+    except Exception as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    label = Path(files[0].filename).name if files else "rappels"
+    job_id = create_job("radio_announcement", label, label)
+    io_executor.submit(_run_announcements_import_job, job_id, tmp_dir, temp_paths)
+    return {"job_id": job_id}
 
 
 @router.put("/announcements/{announcement_id}", response_model=RadioAnnouncementResponse)

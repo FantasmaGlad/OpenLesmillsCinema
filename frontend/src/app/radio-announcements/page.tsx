@@ -3,6 +3,16 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useAppSettings } from "@/lib/AppSettingsContext";
 import Icon from "@/components/Icon";
+import { useUploadManager } from "@/lib/UploadManager";
+
+// Extensions audio acceptées (miroir de AUDIO_EXTENSIONS côté backend) : sert
+// à filtrer côté client les fichiers non-audio d'un import de dossier
+// (webkitdirectory renvoie tout le contenu, sous-dossiers compris).
+const AUDIO_EXTENSIONS = [
+  ".mp3", ".m4a", ".aac", ".mp4", ".ogg", ".oga", ".opus", ".webm", ".flac", ".wav",
+  ".wma", ".aiff", ".aif", ".aifc", ".ape", ".alac", ".wv", ".mka", ".m4b", ".ac3",
+];
+const isAudioFile = (name: string) => AUDIO_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext));
 
 // Écran « Rappels » (réf. docs/cahier-des-charges-radio.md §7, lot L6) —
 // refonte UI/UX (style de la bibliothèque radio) : en-tête clair, import
@@ -55,6 +65,28 @@ export default function RadioAnnouncementsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [uploadMode, setUploadMode] = useState<"file" | "folder">("file");
+  const [dragActive, setDragActive] = useState(false);
+  const [selectedFileName, setSelectedFileName] = useState("");
+  const { uploads, addUploads } = useUploadManager();
+  const seenDoneIds = useRef<Set<string>>(new Set());
+
+  // Bascule l'attribut `webkitdirectory` sur l'input caché selon le mode (réf.
+  // pattern déjà en place pour la bibliothèque radio) : posé impérativement,
+  // React ne gère pas proprement cet attribut booléen non standard en JSX.
+  useEffect(() => {
+    const el = fileInputRef.current;
+    if (!el) return;
+    if (uploadMode === "folder") {
+      el.setAttribute("webkitdirectory", "");
+      el.setAttribute("directory", "");
+      el.multiple = true;
+    } else {
+      el.removeAttribute("webkitdirectory");
+      el.removeAttribute("directory");
+      el.multiple = false;
+    }
+  }, [uploadMode]);
 
   const showToast = (message: string, type: ToastState["type"] = "success") => setToast({ message, type });
   useEffect(() => {
@@ -81,6 +113,19 @@ export default function RadioAnnouncementsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- chargement initial uniquement
   }, []);
 
+  // Rafraîchit la liste dès qu'un import groupé se termine (réf. pattern déjà
+  // en place pour la bibliothèque radio) : le job tourne en arrière-plan côté
+  // UploadManager, cette page n'en est notifiée qu'en observant `uploads`.
+  useEffect(() => {
+    const newlyDone = uploads.filter(
+      (u) => u.kind === "radio_announcement_files" && u.status === "done" && !seenDoneIds.current.has(u.id)
+    );
+    if (newlyDone.length === 0) return;
+    newlyDone.forEach((u) => seenDoneIds.current.add(u.id));
+    fetchAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploads]);
+
   const handleUpload = async () => {
     const file = fileInputRef.current?.files?.[0];
     if (!file || !description.trim()) return;
@@ -93,6 +138,7 @@ export default function RadioAnnouncementsPage() {
       if (res.ok) {
         showToast(t("radioAnnouncements.importedToast"));
         setDescription("");
+        setSelectedFileName("");
         if (fileInputRef.current) fileInputRef.current.value = "";
         fetchAll();
       } else {
@@ -102,6 +148,43 @@ export default function RadioAnnouncementsPage() {
       showToast(t("radioAnnouncements.importError"), "error");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleFolderUpload = (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const folderName = fileList[0].webkitRelativePath?.split("/")[0] || t("radioAnnouncements.folder");
+    const files = Array.from(fileList).filter((f) => isAudioFile(f.name));
+    if (files.length === 0) {
+      showToast(t("radioAnnouncements.noAudioInFolder"), "warning");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    addUploads([{ kind: "radio_announcement_files", files, title: `${folderName} (${files.length})` }]);
+    showToast(t("radioAnnouncements.importStarted"));
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(e.type === "dragenter" || e.type === "dragover");
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (uploadMode === "folder") {
+      handleFolderUpload(e.dataTransfer.files);
+    } else if (e.dataTransfer.files?.[0] && fileInputRef.current) {
+      // Assigne le fichier déposé à l'input caché pour rester sur le même
+      // chemin (bouton "Importer" + description obligatoire) qu'une
+      // sélection manuelle.
+      const dt = new DataTransfer();
+      dt.items.add(e.dataTransfer.files[0]);
+      fileInputRef.current.files = dt.files;
+      setSelectedFileName(e.dataTransfer.files[0].name);
     }
   };
 
@@ -255,26 +338,60 @@ export default function RadioAnnouncementsPage() {
           {/* Import */}
           <div className="ra-card">
             <h3 className="ra-card-title"><Icon name="upload" size={18} /> {t("radioAnnouncements.importTitle")}</h3>
-            <p className="ra-card-hint">{t("radioAnnouncements.importHint")}</p>
-            <div className="ra-import-form">
-              <label className="ra-field">
-                <span className="ra-field-label">{t("radioAnnouncements.fileLabel")}</span>
-                <input ref={fileInputRef} type="file" accept="audio/*" className="form-control" />
-              </label>
-              <label className="ra-field">
-                <span className="ra-field-label">{t("radioAnnouncements.descriptionLabel")}</span>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder={t("radioAnnouncements.descriptionPlaceholder")}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-              </label>
-              <button className="btn btn-primary" style={{ height: "44px" }} onClick={handleUpload} disabled={uploading || !description.trim()}>
-                <Icon name="upload" size={16} /> {uploading ? t("radioAnnouncements.importing") : t("radioAnnouncements.importButton")}
+            <p className="ra-card-hint">
+              {uploadMode === "file" ? t("radioAnnouncements.importHint") : t("radioAnnouncements.importFolderHint")}
+            </p>
+            <div className="view-toggle" style={{ marginBottom: "10px" }}>
+              <button type="button" className={`view-btn ${uploadMode === "file" ? "active" : ""}`} onClick={() => setUploadMode("file")}>
+                <Icon name="description" size={14} /> {t("radioAnnouncements.chooseFile")}
+              </button>
+              <button type="button" className={`view-btn ${uploadMode === "folder" ? "active" : ""}`} onClick={() => setUploadMode("folder")}>
+                <Icon name="folder" size={14} /> {t("radioAnnouncements.chooseFolder")}
               </button>
             </div>
+
+            <div
+              className={`upload-zone ${dragActive ? "drag-active" : ""}`}
+              onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*"
+                style={{ display: "none" }}
+                onChange={(e) =>
+                  uploadMode === "folder"
+                    ? handleFolderUpload(e.target.files)
+                    : setSelectedFileName(e.target.files?.[0]?.name ?? "")
+                }
+              />
+              <Icon name="cloud_upload" size={36} className="upload-icon" />
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: "8px 0 0" }}>
+                {uploadMode === "file" ? t("radioAnnouncements.dropFileHint") : t("radioAnnouncements.dropFolderHint")}
+              </p>
+              {uploadMode === "file" && selectedFileName && (
+                <p style={{ fontSize: "0.8rem", fontWeight: 700, margin: "4px 0 0" }}>{selectedFileName}</p>
+              )}
+            </div>
+
+            {uploadMode === "file" && (
+              <div className="ra-import-form" style={{ marginTop: "10px" }}>
+                <label className="ra-field">
+                  <span className="ra-field-label">{t("radioAnnouncements.descriptionLabel")}</span>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={t("radioAnnouncements.descriptionPlaceholder")}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                  />
+                </label>
+                <button className="btn btn-primary" style={{ height: "44px" }} onClick={handleUpload} disabled={uploading || !description.trim()}>
+                  <Icon name="upload" size={16} /> {uploading ? t("radioAnnouncements.importing") : t("radioAnnouncements.importButton")}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Liste des rappels */}

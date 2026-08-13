@@ -43,6 +43,16 @@ def content_type_for(file_path: str) -> str:
     return AUDIO_CONTENT_TYPES.get(Path(file_path).suffix.lower(), "application/octet-stream")
 
 
+def clean_filename_label(file_path: str) -> str:
+    """Dérive un libellé lisible depuis un nom de fichier (underscores en
+    espaces) — utilisé en repli quand aucun tag ID3 de titre n'est présent,
+    et pour dériver automatiquement la description d'un rappel importé en
+    lot (réf. correctif "import groupé de rappels sans ressaisir chaque
+    description à la main")."""
+    stem = Path(file_path).stem.replace("_", " ").strip()
+    return stem or Path(file_path).stem
+
+
 def needs_transcode(file_path: str) -> bool:
     return Path(file_path).suffix.lower() not in WEB_PLAYABLE_EXTENSIONS
 
@@ -114,7 +124,7 @@ def extract_radio_metadata(file_path: str) -> dict:
         meta["duration_seconds"] = None
 
     if not meta["title"]:
-        meta["title"] = Path(file_path).stem.replace("_", " ").strip() or Path(file_path).stem
+        meta["title"] = clean_filename_label(file_path)
 
     return meta
 

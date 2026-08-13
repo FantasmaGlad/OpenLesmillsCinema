@@ -30,7 +30,10 @@ KIOSK_SERVICE_UNIT = "openlesmillscinema-kiosk.service"
 # table `settings` (clé/valeur) et reflétés immédiatement dans le singleton
 # `runtime_settings` en mémoire — le fichier config.toml reste la valeur de
 # secours au tout premier démarrage (avant toute modification via l'UI).
-_WRITABLE_NUMERIC_FIELDS = {"wait_time_between_courses", "volume_default", "audio_chain_timer_seconds"}
+_WRITABLE_NUMERIC_FIELDS = {
+    "wait_time_between_courses", "volume_default", "audio_chain_timer_seconds",
+    "radio_announcement_fade_ms",
+}
 _WRITABLE_STRING_FIELDS = {"theme", "language"}
 _DEFAULTS = {"theme": "les-mills-sombre", "language": "fr"}
 # "les-mills-sombre" est la clé interne historique du thème "Sombre" (réf.
@@ -59,6 +62,7 @@ class SettingsUpdate(BaseModel):
     wait_time_between_courses: int | None = None
     volume_default: int | None = None
     audio_chain_timer_seconds: int | None = None
+    radio_announcement_fade_ms: int | None = None
     theme: str | None = None
     language: str | None = None
 
@@ -78,10 +82,12 @@ def get_settings(db: Session = Depends(get_db)) -> dict[str, Any]:
         "audio_chain_timer_seconds": runtime_settings.audio_chain_timer_seconds,
         "theme": theme,
         "language": language,
-        # Réglages du duck des rappels radio (réf. lot L6) : consommés par
-        # /radio pour le fondu musique pendant une annonce — pas encore
-        # éditables à chaud depuis cette API (valeurs de config.toml
-        # uniquement pour l'instant, cf. _WRITABLE_NUMERIC_FIELDS).
+        # Réglages du duck/fondu des rappels radio (réf. lot L6) : consommés
+        # par /radio pour le fondu musique pendant une annonce, ET pour le
+        # fondu du rappel lui-même (réf. correctif "vitesse du fade
+        # réglable"). radio_announcement_duck_level reste en lecture seule
+        # pour l'instant (pas demandé) ; fade_ms est éditable (cf.
+        # _WRITABLE_NUMERIC_FIELDS).
         "radio_announcement_duck_level": runtime_settings.radio_announcement_duck_level,
         "radio_announcement_fade_ms": runtime_settings.radio_announcement_fade_ms,
         # Chemins en lecture seule (réf. UX3.17 "chemins d'information")

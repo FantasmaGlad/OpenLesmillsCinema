@@ -10,6 +10,7 @@ interface SettingsData {
   wait_time_between_courses: number;
   volume_default: number;
   audio_chain_timer_seconds: number;
+  radio_announcement_fade_ms: number;
   paths: Record<string, string>;
 }
 
@@ -135,6 +136,7 @@ export default function SettingsPage() {
           wait_time_between_courses: data.wait_time_between_courses,
           volume_default: data.volume_default,
           audio_chain_timer_seconds: data.audio_chain_timer_seconds,
+          radio_announcement_fade_ms: data.radio_announcement_fade_ms,
         }),
       });
       if (res.ok) {
@@ -267,6 +269,11 @@ export default function SettingsPage() {
             <label className="form-label">{t("settingsPage.chainTimerLabel")}</label>
             <input type="number" min={1} className="form-control" value={data.audio_chain_timer_seconds}
               onChange={(e) => setData({ ...data, audio_chain_timer_seconds: Number(e.target.value) })} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">{t("settingsPage.announcementFadeLabel")}</label>
+            <input type="number" min={0} className="form-control" value={data.radio_announcement_fade_ms}
+              onChange={(e) => setData({ ...data, radio_announcement_fade_ms: Number(e.target.value) })} />
           </div>
         </div>
         <button type="submit" className="btn btn-primary" style={{ height: "48px", alignSelf: "flex-start", marginTop: "4px" }} disabled={saving}>

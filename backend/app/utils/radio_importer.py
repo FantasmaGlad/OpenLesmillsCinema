@@ -20,6 +20,7 @@ from app.utils.activity_log import log_activity
 from app.utils.import_jobs import update_job
 from app.utils.radio_utils import (
     AUDIO_EXTENSIONS,
+    clean_filename_label,
     extract_embedded_cover,
     extract_radio_metadata,
     needs_transcode,
@@ -141,12 +142,10 @@ def import_radio_track_from_watched_file(file_path: str, job_id: str | None = No
     return import_radio_tracks_from_files([file_path], source=ImportSource.watched_folder, job_id=job_id)
 
 
-def import_radio_announcement(file_path: str, description: str, db) -> RadioAnnouncement:
-    """Importe un rappel (réf. lot L6, D11-D13) : fichier unique + description
-    OBLIGATOIRE, saisie en même temps que l'upload — pas de traitement en
-    arrière-plan (pas de dossier surveillé pour les rappels, cf. §10.2 :
-    une description manuelle est de toute façon requise). Effectue le commit."""
-    src = Path(file_path)
+def _ingest_announcement(db, src: Path, description: str) -> RadioAnnouncement:
+    """Ingère un fichier de rappel : normalisation loudness + placement disque
+    + ligne DB. N'effectue PAS le commit (fait par l'appelant, seul ou en
+    lot)."""
     if src.suffix.lower() not in AUDIO_EXTENSIONS:
         raise ValueError(f"Format audio non pris en charge : {src.suffix}")
 
@@ -165,7 +164,61 @@ def import_radio_announcement(file_path: str, description: str, db) -> RadioAnno
         file_path=str(dest_path), description=description, duration_seconds=meta["duration_seconds"],
     )
     db.add(announcement)
+    return announcement
+
+
+def import_radio_announcement(file_path: str, description: str, db) -> RadioAnnouncement:
+    """Importe un rappel (réf. lot L6, D11-D13) : fichier unique + description
+    OBLIGATOIRE, saisie en même temps que l'upload — pas de traitement en
+    arrière-plan (pas de dossier surveillé pour les rappels, cf. §10.2 :
+    une description manuelle est de toute façon requise). Effectue le commit."""
+    announcement = _ingest_announcement(db, Path(file_path), description)
     db.commit()
     db.refresh(announcement)
     log_activity(db, "radio_announcement_imported", description)
     return announcement
+
+
+def import_radio_announcements_from_files(
+    paths: list[str], job_id: str | None = None
+) -> list[RadioAnnouncement]:
+    """Import groupé de rappels (dossier ou plusieurs fichiers à la fois, réf.
+    correctif "import de dossiers pour les rappels") : la description
+    obligatoire d'un import unique n'a pas de sens ici — elle est dérivée
+    automatiquement du nom de fichier (décision actée), modifiable ensuite
+    dans la liste des rappels. Tolérant aux échecs isolés, même stratégie que
+    `import_radio_tracks_from_files`."""
+    audio_paths = [
+        Path(p) for p in paths
+        if Path(p).suffix.lower() in AUDIO_EXTENSIONS and not Path(p).name.startswith(".")
+    ]
+    if not audio_paths:
+        raise ValueError("Aucun fichier audio pris en charge fourni pour l'import de rappels.")
+
+    update_job(job_id, stage="saving")
+    db = SessionLocal()
+    created: list[RadioAnnouncement] = []
+    try:
+        for src in audio_paths:
+            if not src.exists():
+                continue
+            try:
+                created.append(_ingest_announcement(db, src, clean_filename_label(str(src))))
+            except Exception as e:
+                logger.error(f"Import de rappel : échec pour {src.name} : {e}")
+
+        if not created:
+            raise ValueError("Aucun rappel n'a pu être importé (tous les fichiers ont échoué).")
+
+        db.commit()
+        for a in created:
+            db.refresh(a)
+        logger.info(f"Import de rappels : {len(created)} importé(s).")
+        log_activity(db, "radio_announcements_imported", f"{len(created)} rappel(s)")
+        ids = [a.id for a in created]
+        return db.query(RadioAnnouncement).filter(RadioAnnouncement.id.in_(ids)).all()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
