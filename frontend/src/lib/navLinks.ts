@@ -20,10 +20,11 @@ export function isNavGroup(entry: NavEntry): entry is NavGroupConfig {
 }
 
 // Arborescence de la barre latérale (réf. demande de réorganisation) :
-// - "Sortie Câblé" / "Sortie Réseau" (ex-tableaux de bord), puis "Radio".
+// - "Sortie Câblé" / "Sortie Réseau" (ex-tableaux de bord) en tête, puis
+//   "Radio" et "Coach" remontés juste en dessous (réf. demande).
 // - "Radio" regroupe télécommande + bibliothèque + rappels.
-// - "Playlist" est une page unique fusionnant playlists vidéo et audio.
 // - "Coach" regroupe cours audio + fonds animés.
+// - "Playlist" est une page unique fusionnant playlists vidéo et audio.
 export const navEntries: NavEntry[] = [
   { href: "/dashboard-cable", labelKey: "nav.dashboardCable", iconName: "cable" },
   { href: "/dashboard-network", labelKey: "nav.dashboardNetwork", iconName: "wifi" },
@@ -36,8 +37,6 @@ export const navEntries: NavEntry[] = [
       { href: "/radio-announcements", labelKey: "nav.radioAnnouncements", iconName: "campaign" },
     ],
   },
-  { href: "/library", labelKey: "nav.library", iconName: "video_library" },
-  { href: "/playlists", labelKey: "nav.playlists", iconName: "playlist_play" },
   {
     groupKey: "nav.coachGroup",
     iconName: "fitness_center",
@@ -46,6 +45,8 @@ export const navEntries: NavEntry[] = [
       { href: "/backgrounds", labelKey: "nav.backgrounds", iconName: "gradient" },
     ],
   },
+  { href: "/library", labelKey: "nav.library", iconName: "video_library" },
+  { href: "/playlists", labelKey: "nav.playlists", iconName: "playlist_play" },
   { href: "/schedule", labelKey: "nav.schedule", iconName: "calendar_month" },
 ];
 
