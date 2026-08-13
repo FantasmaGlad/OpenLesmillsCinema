@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI):
     await close_redis()
 
 
-app = FastAPI(title="OpenLesmillsCinema", lifespan=lifespan)
+app = FastAPI(title="Bobine", lifespan=lifespan)
 
 # Configuration CORS pour le développement
 app.add_middleware(

@@ -24,8 +24,8 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 # Noms exacts des unités systemd installées par install.sh (réf. audit
 # plan-corrections-bugs, point 4) — à garder synchronisés avec ce fichier.
-BACKEND_SERVICE_UNIT = "openlesmillscinema-backend.service"
-KIOSK_SERVICE_UNIT = "openlesmillscinema-kiosk.service"
+BACKEND_SERVICE_UNIT = "bobine-backend.service"
+KIOSK_SERVICE_UNIT = "bobine-kiosk.service"
 
 # Réglages ajustables depuis l'interface (réf. UX3.17), persistés dans la
 # table `settings` (clé/valeur) et reflétés immédiatement dans le singleton
@@ -372,8 +372,8 @@ async def reset_system(background_tasks: BackgroundTasks) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Désinstallation complète (bouton « Désinstaller » — remise à zéro machine)
 # ---------------------------------------------------------------------------
-UNINSTALL_WRAPPER = Path("/usr/local/sbin/openlesmillscinema-uninstall")
-SUDOERS_FILE = Path("/etc/sudoers.d/openlesmillscinema")
+UNINSTALL_WRAPPER = Path("/usr/local/sbin/bobine-uninstall")
+SUDOERS_FILE = Path("/etc/sudoers.d/bobine")
 
 
 class UninstallRequest(BaseModel):
@@ -397,7 +397,7 @@ async def _run_uninstall():
 async def uninstall_system(payload: UninstallRequest, background_tasks: BackgroundTasks) -> dict[str, str]:
     """Remise à zéro complète de la machine (réf. bouton « Désinstaller ») :
     services systemd + config /etc + application + venv + TOUTES les données,
-    via l'enveloppe /usr/local/sbin/openlesmillscinema-uninstall (appelée en
+    via l'enveloppe /usr/local/sbin/bobine-uninstall (appelée en
     root sans mot de passe grâce à la règle sudoers dédiée). Les paquets apt
     partagés ne sont PAS retirés. Action IRRÉVERSIBLE — l'UI exige une phrase
     de confirmation avant cet appel.

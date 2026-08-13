@@ -9,10 +9,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Set test directories before importing config
-os.environ["OPENLESMILLS_DATABASE_URL"] = "sqlite:///data/test_background_database.db"
-os.environ["OPENLESMILLS_BACKGROUNDS_DIR"] = "data/test_backgrounds"
-os.environ["OPENLESMILLS_BACKGROUNDS_WATCH_DIR"] = "data/test_backgrounds_watched"
-os.environ["OPENLESMILLS_THUMBNAILS_DIR"] = "data/test_background_thumbnails"
+os.environ["BOBINE_DATABASE_URL"] = "sqlite:///data/test_background_database.db"
+os.environ["BOBINE_BACKGROUNDS_DIR"] = "data/test_backgrounds"
+os.environ["BOBINE_BACKGROUNDS_WATCH_DIR"] = "data/test_backgrounds_watched"
+os.environ["BOBINE_THUMBNAILS_DIR"] = "data/test_background_thumbnails"
 
 from app.config import settings
 from app.database import init_db, SessionLocal

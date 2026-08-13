@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Set test database
-os.environ["OPENLESMILLS_DATABASE_URL"] = "sqlite:///data/test_schedule_database.db"
+os.environ["BOBINE_DATABASE_URL"] = "sqlite:///data/test_schedule_database.db"
 
 from fastapi import HTTPException
 

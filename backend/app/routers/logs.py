@@ -64,7 +64,7 @@ def download_technical_log():
     log_path = settings.technical_log_path
     if not log_path.exists():
         return PlainTextResponse("", media_type="text/plain")
-    return FileResponse(log_path, filename="openlesmillscinema-technical.log", media_type="text/plain")
+    return FileResponse(log_path, filename="bobine-technical.log", media_type="text/plain")
 
 
 @router.delete("/activity")

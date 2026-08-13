@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# backup.sh — Sauvegarde complète d'OpenLesmillsCinema (réf. NF7, tâche 15.6).
+# backup.sh — Sauvegarde complète d'Bobine (réf. NF7, tâche 15.6).
 #
 # Usage :
 #   ./scripts/backup.sh [dossier_de_destination]
@@ -52,7 +52,7 @@ print(json.dumps({
 ')"
 
 DB_PATH="$(echo "${PATHS_JSON}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["database"])')"
-CONFIG_FILE="/etc/openlesmillscinema/config.toml"
+CONFIG_FILE="/etc/bobine/config.toml"
 [[ -f "${CONFIG_FILE}" ]] || CONFIG_FILE="${BACKEND_DIR}/config.toml"
 
 mkdir -p "${DEST_DIR}" "${WORK_DIR}/backup"
@@ -82,7 +82,7 @@ for key in media_dir backgrounds_dir audio_dir thumbnails_dir radio_dir radio_co
     fi
 done
 
-ARCHIVE="${DEST_DIR}/openlesmillscinema-backup-${TIMESTAMP}.tar.gz"
+ARCHIVE="${DEST_DIR}/bobine-backup-${TIMESTAMP}.tar.gz"
 log "Création de l'archive : ${ARCHIVE}"
 tar -czf "${ARCHIVE}" -C "${WORK_DIR}/backup" .
 

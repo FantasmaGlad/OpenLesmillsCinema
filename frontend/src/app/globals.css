@@ -1,7 +1,7 @@
-/* OpenLesmillsCinema — Global Styles & Design System */
+/* Bobine — Global Styles & Design System */
 
 :root {
-  /* Colors - Les Mills Dark Theme (thème par défaut, réf. UX1.1) */
+  /* Colors - Dark Theme (thème par défaut, réf. UX1.1) */
   --bg-main: #0a0a0a;
   --bg-surface: #141414;
   --bg-surface-elevated: #1e1e20;
@@ -20,7 +20,7 @@
   --border-focus: #48484a;
 
   /* Accent Colors */
-  --accent-primary: #e4002b; /* Les Mills Red */
+  --accent-primary: #e4002b; /* Rouge Bobine */
   /* Couleur de texte/icône lisible posée SUR --accent-primary (réf. mission
      "100% des éléments sur le thème") : recalculée par thème (luminance WCAG
      réelle de l'accent — blanc sur les accents foncés, encre sombre sur les

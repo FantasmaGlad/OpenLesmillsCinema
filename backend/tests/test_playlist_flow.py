@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Set test database
-os.environ["OPENLESMILLS_DATABASE_URL"] = "sqlite:///data/test_playlist_database.db"
+os.environ["BOBINE_DATABASE_URL"] = "sqlite:///data/test_playlist_database.db"
 
 from app.config import settings
 from app.database import init_db, SessionLocal

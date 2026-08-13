@@ -1,4 +1,4 @@
-OpenLesmillsCinema — Installation sur le mini PC (Wyse 5070 / Debian 13)
+Bobine — Installation sur le mini PC (Wyse 5070 / Debian 13)
 =========================================================================
 
 Ce document décrit comment amener le code source sur la machine cible
@@ -32,7 +32,7 @@ pas d'accès Internet sortant.
       --exclude='backend/data' --exclude='data' \
       --exclude='frontend/node_modules' --exclude='frontend/.next' \
       --exclude='frontend/out' \
-      ./ <UTILISATEUR>@<IP-DE-LA-MACHINE>:~/OpenLesmillsCinema/
+      ./ <UTILISATEUR>@<IP-DE-LA-MACHINE>:~/Bobine/
 
     (rsync sera demandé un mot de passe SSH à chaque lancement, sauf si
     une clé est en place — voir §1.3 optionnel ci-dessous.)
@@ -65,8 +65,8 @@ Si le dépôt est hébergé sur GitHub, deux variantes :
     Internet sortant) :
 
     ssh <UTILISATEUR>@<IP-DE-LA-MACHINE>
-    git clone <URL-DU-DEPOT-GITHUB> ~/OpenLesmillsCinema
-    cd ~/OpenLesmillsCinema
+    git clone <URL-DU-DEPOT-GITHUB> ~/Bobine
+    cd ~/Bobine
 
     <URL-DU-DEPOT-GITHUB> est soit l'URL HTTPS
     (https://github.com/<organisation>/<depot>.git), soit l'URL SSH
@@ -76,14 +76,14 @@ Si le dépôt est hébergé sur GitHub, deux variantes :
 2.2 Ou cloner en local puis transférer par SSH (utile si seule votre
     machine de développement a un accès GitHub) :
 
-    git clone <URL-DU-DEPOT-GITHUB> OpenLesmillsCinema
-    cd OpenLesmillsCinema
-    rsync -avz --exclude='.git' ./ <UTILISATEUR>@<IP-DE-LA-MACHINE>:~/OpenLesmillsCinema/
+    git clone <URL-DU-DEPOT-GITHUB> Bobine
+    cd Bobine
+    rsync -avz --exclude='.git' ./ <UTILISATEUR>@<IP-DE-LA-MACHINE>:~/Bobine/
 
 2.3 Pour mettre à jour une machine cible déjà clonée directement (§2.1),
     depuis la machine cible :
 
-    cd ~/OpenLesmillsCinema
+    cd ~/Bobine
     git pull
 
 
@@ -93,7 +93,7 @@ Si le dépôt est hébergé sur GitHub, deux variantes :
 Depuis une session SSH ouverte sur la machine cible, dans le dossier du
 dépôt :
 
-    cd ~/OpenLesmillsCinema
+    cd ~/Bobine
     sudo ./install.sh
 
 Ce que fait le script (réf. Lot 14 du plan de construction) :
@@ -105,13 +105,13 @@ Ce que fait le script (réf. Lot 14 du plan de construction) :
   - ajoute votre utilisateur aux groupes `render`/`video` (nécessaire
     pour le décodage vidéo matériel, cf. Lot 0) ;
   - écrit la configuration de production dans
-    /etc/openlesmillscinema/config.toml ;
+    /etc/bobine/config.toml ;
   - installe et démarre les services systemd (backend, kiosk Chromium,
     garde audio, redirection du port 80 vers 8000) ;
   - pose une règle sudoers restreinte (redémarrage des services + enveloppe
     de désinstallation) pour les boutons de l'interface ;
-  - installe le script de contrôle `openlesmillscinema` et l'enveloppe de
-    désinstallation /usr/local/sbin/openlesmillscinema-uninstall.
+  - installe le script de contrôle `bobine` et l'enveloppe de
+    désinstallation /usr/local/sbin/bobine-uninstall.
 
 Le script est idempotent : le relancer après une resynchronisation ou
 un `git pull` met à jour proprement l'installation existante.
@@ -126,7 +126,7 @@ Après redémarrage, vérifiez que le décodage matériel fonctionne
 toujours (cf. Lot 0) :
 
     vainfo                        # doit lister les profils H.264/HEVC (pilote iHD)
-    openlesmillscinema status     # les deux services doivent être actifs
+    bobine status     # les deux services doivent être actifs
 
 
 4. Accès et contrôle au quotidien
@@ -137,7 +137,7 @@ toujours (cf. Lot 0) :
   - Écran cinéma (kiosk) : démarre automatiquement au boot.
   - Contrôle des services :
 
-        openlesmillscinema start|stop|restart|status|logs
+        bobine start|stop|restart|status|logs
 
   - Sortie du mode kiosk pour accéder à l'administration en local sur
     le mini PC : changement de terminal virtuel au clavier
@@ -146,7 +146,7 @@ toujours (cf. Lot 0) :
 
 5. En cas de problème
 
-  - Logs techniques en direct : `openlesmillscinema logs`
+  - Logs techniques en direct : `bobine logs`
   - Logs applicatifs consultables aussi depuis l'interface web
     (section Logs).
   - `bash -n install.sh` permet de vérifier la syntaxe du script sans
@@ -162,7 +162,7 @@ Deux voies équivalentes :
     (recopie de la phrase « DÉSINSTALLER » exigée).
   - Ligne de commande, sur la machine cible :
 
-        cd ~/OpenLesmillsCinema
+        cd ~/Bobine
         sudo ./install.sh --uninstall --purge --purge-data
 
 Retire les services systemd, la config /etc, l'application, le venv et

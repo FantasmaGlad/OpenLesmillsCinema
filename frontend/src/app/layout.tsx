@@ -24,8 +24,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OpenLesmillsCinema - Administration",
-  description: "Système de cinéma automatisé pour les cours Les Mills",
+  title: "Bobine - Administration",
+  description: "Système de cinéma automatisé pour vos cours en salle",
   manifest: "/manifest.json",
 };
 

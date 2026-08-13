@@ -1,8 +1,8 @@
-# OpenLesmillsCinema
+# Bobine
 
 Diffusion, planification et pilotage de vidéos de cours en salle, sur mini PC dédié. Serveur multi-worker FastAPI + Redis + SQLite, kiosque Chromium X11, interface d'administration et télécommande mobile Next.js.
 
-Ce document est écrit pour quiconque souhaite **comprendre, exploiter, modifier ou déployer** le système OpenLesmillsCinema : il décrit l'architecture réellement en place (pas une intention), le contrat réseau, le modèle de données inter-workers, ainsi que la configuration d'exploitation sur mini PC dédié.
+Ce document est écrit pour quiconque souhaite **comprendre, exploiter, modifier ou déployer** le système Bobine : il décrit l'architecture réellement en place (pas une intention), le contrat réseau, le modèle de données inter-workers, ainsi que la configuration d'exploitation sur mini PC dédié.
 
 ---
 
@@ -62,8 +62,8 @@ cd frontend && npx tsc --noEmit
 ### Configuration (`config.toml`)
 
 La configuration est chargée selon l'ordre de priorité suivant :
-1. Variables d'environnement préfixées `OPENLESMILLS_` (priorité maximale).
-2. `/etc/openlesmillscinema/config.toml` (production, écrit par `install.sh`).
+1. Variables d'environnement préfixées `BOBINE_` (priorité maximale).
+2. `/etc/bobine/config.toml` (production, écrit par `install.sh`).
 3. `config.toml` à la racine du dépôt (développement).
 
 | Clé | Défaut | Rôle |
@@ -192,19 +192,19 @@ sudo ./install.sh
 
 ### Services Systemd créés
 
-- `openlesmillscinema-backend.service` : API FastAPI Uvicorn sur le port 8000 (4 workers).
-- `openlesmillscinema-kiosk.service` : Mode Kiosque Chromium plein écran sur `xinit` (X11).
-- `openlesmillscinema-audio-guard.service` : Watchdog de surveillance du système et de l'audio (silence hors session kiosque).
-- `openlesmillscinema-redirect.service` : Redirection nftables du port 80 vers 8000.
+- `bobine-backend.service` : API FastAPI Uvicorn sur le port 8000 (4 workers).
+- `bobine-kiosk.service` : Mode Kiosque Chromium plein écran sur `xinit` (X11).
+- `bobine-audio-guard.service` : Watchdog de surveillance du système et de l'audio (silence hors session kiosque).
+- `bobine-redirect.service` : Redirection nftables du port 80 vers 8000.
 
 Pas de service dédié pour le canal Radio (arbitrage A5, cf. §5) : `/radio` s'ouvre à la main dans un navigateur, sur le même backend.
 
 ### Autorisation sudo restreinte & désinstallation depuis l'interface
 
-`install.sh` écrit `/etc/sudoers.d/openlesmillscinema` autorisant **sans mot de passe, et uniquement**, deux actions déclenchées depuis l'admin :
+`install.sh` écrit `/etc/sudoers.d/bobine` autorisant **sans mot de passe, et uniquement**, deux actions déclenchées depuis l'admin :
 
 - le **redémarrage** des services (`systemctl restart`) — bouton « Réinitialisation complète » (Paramètres → Maintenance), qui recharge tous les écrans connectés puis relance backend + kiosque ;
-- l'enveloppe de **désinstallation** `/usr/local/sbin/openlesmillscinema-uninstall` — bouton « Désinstaller » (Paramètres → **Zone de danger**). L'enveloppe détache la remise à zéro via `systemd-run` (pour survivre à l'arrêt du service backend) puis exécute `install.sh --uninstall --purge --purge-data -y` : arrêt/suppression des services + config `/etc` + application + venv + **toutes les données** (les paquets `apt` partagés sont conservés). L'UI exige de recopier la phrase « DÉSINSTALLER » ; hors machine installée (poste de dev), l'endpoint refuse proprement.
+- l'enveloppe de **désinstallation** `/usr/local/sbin/bobine-uninstall` — bouton « Désinstaller » (Paramètres → **Zone de danger**). L'enveloppe détache la remise à zéro via `systemd-run` (pour survivre à l'arrêt du service backend) puis exécute `install.sh --uninstall --purge --purge-data -y` : arrêt/suppression des services + config `/etc` + application + venv + **toutes les données** (les paquets `apt` partagés sont conservés). L'UI exige de recopier la phrase « DÉSINSTALLER » ; hors machine installée (poste de dev), l'endpoint refuse proprement.
 
 ---
 
@@ -254,12 +254,12 @@ Sur le réseau local, la machine Wyse de production (`pavilion-malefique` / Dell
 
 ```bash
 # Vérifier l'état des services systemd sur la Wyse
-ssh fanta@<WYSE_IP> "systemctl status openlesmillscinema-backend openlesmillscinema-kiosk"
+ssh fanta@<WYSE_IP> "systemctl status bobine-backend bobine-kiosk"
 ```
 
 ### Déploiement sur la Wyse
 
-⚠️ **`git pull` ne fonctionne PAS sur la Wyse** : son réseau bloque GitHub entièrement (ports 22 **et** 443 vers github.com). Le dépôt `/home/fanta/OpenLesmillsCinema` sur la Wyse **n'est pas un clone git** — le déploiement se fait par copie (`rsync`) depuis un poste de dev sur le même réseau local, jamais par `git pull` sur la machine cible elle-même.
+⚠️ **`git pull` ne fonctionne PAS sur la Wyse** : son réseau bloque GitHub entièrement (ports 22 **et** 443 vers github.com). Le dépôt `/home/fanta/Bobine` sur la Wyse **n'est pas un clone git** — le déploiement se fait par copie (`rsync`) depuis un poste de dev sur le même réseau local, jamais par `git pull` sur la machine cible elle-même.
 
 ```bash
 # 1. Depuis le poste de dev, sur le même LAN que la Wyse — toujours en
@@ -271,23 +271,23 @@ rsync -a --delete --dry-run \
   --exclude='backend/.pytest_cache/' --exclude='VideoTest/' \
   --exclude='.claude/' --exclude='.agents/' --exclude='.gemini/' \
   --exclude='AGENTS.md' --exclude='CLAUDE.md' \
-  ./ fanta@<WYSE_IP>:/home/fanta/OpenLesmillsCinema/
+  ./ fanta@<WYSE_IP>:/home/fanta/Bobine/
 # (puis sans --dry-run une fois vérifié)
 
 # 2. Sur la Wyse : si le déploiement ajoute/modifie des dossiers média, des
 #    réglages de config.toml ou des services systemd, relancer l'installateur
 #    (idempotent, ne touche jamais data/ hors --uninstall --purge-data) :
-ssh fanta@<WYSE_IP> "cd /home/fanta/OpenLesmillsCinema && sudo ./install.sh --skip-packages -y"
+ssh fanta@<WYSE_IP> "cd /home/fanta/Bobine && sudo ./install.sh --skip-packages -y"
 # Pour un changement de CODE SEUL (aucun nouveau dossier/réglage/service),
 # un simple rebuild suffit à la place de l'étape ci-dessus :
-#   ssh fanta@<WYSE_IP> "cd /home/fanta/OpenLesmillsCinema/frontend && npm run build"
+#   ssh fanta@<WYSE_IP> "cd /home/fanta/Bobine/frontend && npm run build"
 
 # 3. install.sh ne redémarre PAS un service déjà actif : redémarrage explicite
 #    pour charger le nouveau code (ces deux commandes sont NOPASSWD) :
-ssh fanta@<WYSE_IP> "sudo -n systemctl restart openlesmillscinema-backend.service && sudo -n systemctl restart openlesmillscinema-kiosk.service"
+ssh fanta@<WYSE_IP> "sudo -n systemctl restart bobine-backend.service && sudo -n systemctl restart bobine-kiosk.service"
 
 # 4. Vérifier : santé de l'API, services actifs, espace disque de data/ inchangé
-ssh fanta@<WYSE_IP> "curl -s localhost:8000/api/health; systemctl is-active openlesmillscinema-backend openlesmillscinema-kiosk; du -sh /home/fanta/OpenLesmillsCinema/data"
+ssh fanta@<WYSE_IP> "curl -s localhost:8000/api/health; systemctl is-active bobine-backend bobine-kiosk; du -sh /home/fanta/Bobine/data"
 ```
 
 Les commits restent locaux jusqu'à ce qu'une machine avec accès GitHub (hors LAN de la Wyse) les pousse sur `origin/main` — le déploiement ne dépend jamais de ce push.

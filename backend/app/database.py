@@ -235,7 +235,7 @@ def reset_database_connection(new_url: str):
     """
     import os
     from app.config import reload_settings, settings
-    os.environ["OPENLESMILLS_DATABASE_URL"] = new_url
+    os.environ["BOBINE_DATABASE_URL"] = new_url
     reload_settings()
 
     global engine, SessionLocal, _IS_SQLITE

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# install.sh — installateur tout-en-un d'OpenLesmillsCinema
+# install.sh — installateur tout-en-un d'Bobine
 # Cible par défaut : Debian 13 (trixie) sur Dell Wyse 5070, Intel Gemini Lake.
 #
 # Usage rapide :
-#   git clone <repo> OpenLesmillsCinema && cd OpenLesmillsCinema
+#   git clone <repo> Bobine && cd Bobine
 #   sudo ./install.sh                 # installation complète (kiosk + backend)
 #   sudo ./install.sh --help          # toutes les options
 #
@@ -36,13 +36,13 @@ ICON_SKIP="${DIM}⤫${RESET}"
 ICON_INFO="${BLUE}→${RESET}"
 
 banner() {
-    printf '\n%s%s  OpenLesmillsCinema%s %s· installateur v%s%s\n' "$BOLD" "$CYAN" "$RESET" "$DIM" "$SCRIPT_VERSION" "$RESET"
+    printf '\n%s%s  Bobine%s %s· installateur v%s%s\n' "$BOLD" "$CYAN" "$RESET" "$DIM" "$SCRIPT_VERSION" "$RESET"
     printf '%s  Debian 13 (trixie) · Dell Wyse 5070 · FastAPI + Next.js%s\n' "$DIM" "$RESET"
 }
 
 usage() {
     cat <<EOF
-${BOLD}${SCRIPT_NAME}${RESET} — installateur tout-en-un d'OpenLesmillsCinema (v${SCRIPT_VERSION})
+${BOLD}${SCRIPT_NAME}${RESET} — installateur tout-en-un d'Bobine (v${SCRIPT_VERSION})
 
 ${BOLD}USAGE${RESET}
   sudo ./${SCRIPT_NAME} [options]
@@ -69,7 +69,7 @@ ${BOLD}EXEMPLES${RESET}
   sudo ./${SCRIPT_NAME} --check               Vérifie l'état des services et affiche un résumé
   sudo ./${SCRIPT_NAME} --uninstall --purge   Désinstalle complètement (conserve les médias importés)
 
-Journal complet de chaque exécution : /var/log/openlesmillscinema/install-*.log
+Journal complet de chaque exécution : /var/log/bobine/install-*.log
 EOF
 }
 
@@ -192,13 +192,13 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="${REPO_DIR}/backend"
 FRONTEND_DIR="${REPO_DIR}/frontend"
 VENV_DIR="${BACKEND_DIR}/.venv"
-CONFIG_DIR="/etc/openlesmillscinema"
+CONFIG_DIR="/etc/bobine"
 CONFIG_FILE="${CONFIG_DIR}/config.toml"
 SERVICE_PORT=8000
 KIOSK_URL="http://127.0.0.1:${SERVICE_PORT}/kiosk"
-UNITS=(openlesmillscinema-backend openlesmillscinema-kiosk openlesmillscinema-audio-guard openlesmillscinema-redirect)
+UNITS=(bobine-backend bobine-kiosk bobine-audio-guard bobine-redirect)
 
-LOG_DIR="/var/log/openlesmillscinema"
+LOG_DIR="/var/log/bobine"
 mkdir -p "${LOG_DIR}" 2>/dev/null || LOG_DIR="/tmp"
 LOG_FILE="${LOG_DIR}/install-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
@@ -206,11 +206,11 @@ exec > >(tee -a "${LOG_FILE}") 2>&1
 # ---- Dispatch : désinstallation ----
 if $DO_UNINSTALL; then
     banner
-    log "Désinstallation d'OpenLesmillsCinema"
+    log "Désinstallation d'Bobine"
     echo "  Dépôt   : ${REPO_DIR}"
     echo "  Journal : ${LOG_FILE}"
 
-    confirm "Arrêter et retirer tous les services OpenLesmillsCinema ?" || { echo "Annulé."; exit 0; }
+    confirm "Arrêter et retirer tous les services Bobine ?" || { echo "Annulé."; exit 0; }
 
     for unit in "${UNITS[@]}"; do
         if systemctl list-unit-files "${unit}.service" &>/dev/null; then
@@ -223,12 +223,12 @@ if $DO_UNINSTALL; then
     done
     run systemctl daemon-reload
 
-    run rm -f /etc/sudoers.d/openlesmillscinema
-    run rm -f /etc/modprobe.d/openlesmillscinema-audio.conf
+    run rm -f /etc/sudoers.d/bobine
+    run rm -f /etc/modprobe.d/bobine-audio.conf
     run rm -f /etc/wireplumber/wireplumber.conf.d/51-fix-jack-autoport.conf
     run rm -f /etc/systemd/system/powertop.service.d/10-audio-nopowersave.conf
-    run rm -f /usr/local/bin/openlesmillscinema
-    run rm -f /usr/local/sbin/openlesmillscinema-uninstall
+    run rm -f /usr/local/bin/bobine
+    run rm -f /usr/local/sbin/bobine-uninstall
     if command -v nft >/dev/null 2>&1; then
         run nft delete table ip olmc_redirect 2>/dev/null || true
     fi
@@ -286,7 +286,7 @@ do_check() {
 
     echo
     box_top
-    box_line "  OpenLesmillsCinema — diagnostic"
+    box_line "  Bobine — diagnostic"
     box_mid
     for unit in "${UNITS[@]}"; do
         if systemctl list-unit-files "${unit}.service" &>/dev/null; then
@@ -341,7 +341,7 @@ $SKIP_BUILD && FLAGS_ACTIVE+="skip-build "
 $ASSUME_YES && FLAGS_ACTIVE+="non-interactif "
 [[ -n "$FLAGS_ACTIVE" ]] && echo "  Options      : ${YELLOW}${FLAGS_ACTIVE}${RESET}"
 
-if systemctl list-unit-files openlesmillscinema-backend.service &>/dev/null; then
+if systemctl list-unit-files bobine-backend.service &>/dev/null; then
     echo "  Mode         : mise à jour d'une installation existante"
 else
     echo "  Mode         : nouvelle installation"
@@ -506,8 +506,8 @@ run mkdir -p \
 run chown -R "${TARGET_USER}:${TARGET_USER}" "${REPO_DIR}/data"
 
 write_file "${CONFIG_FILE}" <<EOF
-# Configuration de production OpenLesmillsCinema — générée par install.sh le $(date -Idate).
-# Modifiable à la main ; relance 'sudo systemctl restart openlesmillscinema-backend'
+# Configuration de production Bobine — générée par install.sh le $(date -Idate).
+# Modifiable à la main ; relance 'sudo systemctl restart bobine-backend'
 # après toute modification pour l'appliquer.
 
 [database]
@@ -555,27 +555,27 @@ fi
 step_done
 
 # ---------------------------------------------------------------------------
-step "Script de contrôle CLI 'openlesmillscinema'"
+step "Script de contrôle CLI 'bobine'"
 # ---------------------------------------------------------------------------
-write_file /usr/local/bin/openlesmillscinema <<'EOF'
+write_file /usr/local/bin/bobine <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-SERVICES=(openlesmillscinema-backend.service openlesmillscinema-kiosk.service)
+SERVICES=(bobine-backend.service bobine-kiosk.service)
 
 case "${1:-}" in
     start)   sudo systemctl start "${SERVICES[@]}" ;;
     stop)    sudo systemctl stop "${SERVICES[@]}" ;;
     restart) sudo systemctl restart "${SERVICES[@]}" ;;
     status)  systemctl status "${SERVICES[@]}" --no-pager ;;
-    logs)    journalctl -u openlesmillscinema-backend -u openlesmillscinema-kiosk -f ;;
+    logs)    journalctl -u bobine-backend -u bobine-kiosk -f ;;
     *)
-        echo "Usage: openlesmillscinema {start|stop|restart|status|logs}"
+        echo "Usage: bobine {start|stop|restart|status|logs}"
         exit 1
         ;;
 esac
 EOF
-run chmod +x /usr/local/bin/openlesmillscinema
-ok "commande 'openlesmillscinema' installée"
+run chmod +x /usr/local/bin/bobine
+ok "commande 'bobine' installée"
 
 # ---------------------------------------------------------------------------
 step "Désinstalleur détaché (bouton « Désinstaller » de l'UI)"
@@ -587,20 +587,20 @@ step "Désinstalleur détaché (bouton « Désinstaller » de l'UI)"
 # dans le même cgroup. La désinstallation elle-même reste celle, déjà testée,
 # de --uninstall --purge --purge-data (services + config + app + données, sans
 # toucher aux paquets apt partagés).
-write_file /usr/local/sbin/openlesmillscinema-uninstall <<EOF
+write_file /usr/local/sbin/bobine-uninstall <<EOF
 #!/usr/bin/env bash
-exec systemd-run --collect --unit=olmc-uninstall --description="OpenLesmillsCinema uninstall" ${REPO_DIR}/install.sh --uninstall --purge --purge-data -y
+exec systemd-run --collect --unit=olmc-uninstall --description="Bobine uninstall" ${REPO_DIR}/install.sh --uninstall --purge --purge-data -y
 EOF
-run chmod +x /usr/local/sbin/openlesmillscinema-uninstall
-ok "désinstalleur '/usr/local/sbin/openlesmillscinema-uninstall' installé"
+run chmod +x /usr/local/sbin/bobine-uninstall
+ok "désinstalleur '/usr/local/sbin/bobine-uninstall' installé"
 step_done
 
 # ---------------------------------------------------------------------------
 step "Service systemd — backend FastAPI"
 # ---------------------------------------------------------------------------
-write_file /etc/systemd/system/openlesmillscinema-backend.service <<EOF
+write_file /etc/systemd/system/bobine-backend.service <<EOF
 [Unit]
-Description=OpenLesmillsCinema - Backend FastAPI
+Description=Bobine - Backend FastAPI
 After=network.target redis-server.service
 Wants=redis-server.service
 
@@ -618,7 +618,7 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 EOF
-ok "openlesmillscinema-backend.service écrit"
+ok "bobine-backend.service écrit"
 step_done
 
 # ---------------------------------------------------------------------------
@@ -701,7 +701,7 @@ done
 # après plusieurs redémarrages. On le réapplique donc à chaque lancement du
 # kiosk (après l'attente ci-dessus, WirePlumber a largement eu le temps de
 # démarrer) plutôt que de compter sur la persistance ALSA seule.
-# Démute explicite : openlesmillscinema-audio-guard.service coupe
+# Démute explicite : bobine-audio-guard.service coupe
 # Master/Speaker par défaut hors session kiosk, c'est ici qu'on les rouvre
 # une fois prêt.
 amixer -c0 sset 'Auto-Mute Mode' 'Line Out+Speaker' >/dev/null 2>&1 || true
@@ -744,7 +744,7 @@ amixer -c0 cset name='Input Source',index=1 'Rear Mic' >/dev/null 2>&1 || true
 # supprime toutes les données temporaires de chargement (cache d'une ancienne
 # version du frontend après mise à jour, état de session "crashed", service
 # workers). Tout est resservi par le backend local, la purge est sans coût.
-KIOSK_PROFILE="/var/tmp/openlesmillscinema-kiosk-profile"
+KIOSK_PROFILE="/var/tmp/bobine-kiosk-profile"
 rm -rf "${KIOSK_PROFILE}"
 
 # Flags VAAPI validés à l'installation — à re-vérifier après install via
@@ -768,11 +768,11 @@ exec ${CHROMIUM_BIN} \
 EOF
     run chmod +x "${CONFIG_DIR}/kiosk-xinitrc"
 
-    write_file /etc/systemd/system/openlesmillscinema-kiosk.service <<EOF
+    write_file /etc/systemd/system/bobine-kiosk.service <<EOF
 [Unit]
-Description=OpenLesmillsCinema - Kiosk Chromium (écran cinéma)
-After=openlesmillscinema-backend.service
-Requires=openlesmillscinema-backend.service
+Description=Bobine - Kiosk Chromium (écran cinéma)
+After=bobine-backend.service
+Requires=bobine-backend.service
 Conflicts=getty@tty1.service
 
 [Service]
@@ -793,7 +793,7 @@ ExecStart=/usr/bin/xinit ${CONFIG_DIR}/kiosk-xinitrc -- :0 vt1 -nolisten tcp
 [Install]
 WantedBy=multi-user.target
 EOF
-    ok "openlesmillscinema-kiosk.service + kiosk-xinitrc écrits"
+    ok "bobine-kiosk.service + kiosk-xinitrc écrits"
     step_done
 fi
 
@@ -833,7 +833,7 @@ EOF
     # continu sur un ampli externe. Constaté sur ce Wyse : 8x plus de temps
     # éteint qu'allumé en usage kiosk normal. Coût : ~0,5W de plus, sans objet
     # sur une machine branchée secteur en continu.
-    write_file /etc/modprobe.d/openlesmillscinema-audio.conf <<'EOF'
+    write_file /etc/modprobe.d/bobine-audio.conf <<'EOF'
 options snd-hda-intel power_save=0 power_save_controller=N
 EOF
     # Application immédiate sans attendre le prochain reboot.
@@ -866,10 +866,10 @@ EOF
     # pilotée peut hurler. Ce service coupe Master + Speaker au tout début du
     # boot (bien avant le kiosk) et les recoupe explicitement à l'arrêt ;
     # kiosk-xinitrc les rouvre une fois réellement prêt à jouer du son.
-    write_file /etc/systemd/system/openlesmillscinema-audio-guard.service <<'EOF'
+    write_file /etc/systemd/system/bobine-audio-guard.service <<'EOF'
 [Unit]
-Description=OpenLesmillsCinema - Coupe le son hors session kiosk
-Before=openlesmillscinema-kiosk.service
+Description=Bobine - Coupe le son hors session kiosk
+Before=bobine-kiosk.service
 StartLimitIntervalSec=30
 StartLimitBurst=20
 
@@ -904,26 +904,26 @@ step "Autorisation sudo restreinte (bouton de réinitialisation)"
 # ---------------------------------------------------------------------------
 log "Autorisation sudo restreinte pour le redémarrage des services depuis l'UI"
 if $NO_KIOSK; then
-    SUDOERS_UNITS="/usr/bin/systemctl restart openlesmillscinema-backend.service"
+    SUDOERS_UNITS="/usr/bin/systemctl restart bobine-backend.service"
 else
-    SUDOERS_UNITS="/usr/bin/systemctl restart openlesmillscinema-backend.service, /usr/bin/systemctl restart openlesmillscinema-kiosk.service"
+    SUDOERS_UNITS="/usr/bin/systemctl restart bobine-backend.service, /usr/bin/systemctl restart bobine-kiosk.service"
 fi
 # Enveloppe de désinstallation (bouton « Désinstaller » de l'UI) : commande
 # unique, sans argument, qui détache le --uninstall via systemd-run.
-SUDOERS_UNITS="${SUDOERS_UNITS}, /usr/local/sbin/openlesmillscinema-uninstall"
-write_file /etc/sudoers.d/openlesmillscinema <<EOF
+SUDOERS_UNITS="${SUDOERS_UNITS}, /usr/local/sbin/bobine-uninstall"
+write_file /etc/sudoers.d/bobine <<EOF
 # Autorise UNIQUEMENT ces commandes précises, sans mot de passe :
 #   - le redémarrage des unités (bouton de réinitialisation des paramètres) ;
-#   - l'enveloppe de désinstallation /usr/local/sbin/openlesmillscinema-uninstall
+#   - l'enveloppe de désinstallation /usr/local/sbin/bobine-uninstall
 #     (bouton « Désinstaller », remise à zéro complète).
 # Ne JAMAIS élargir à d'autres commandes ni remplacer par NOPASSWD: ALL.
 ${TARGET_USER} ALL=(root) NOPASSWD: ${SUDOERS_UNITS}
 EOF
 if ! $DRY_RUN; then
-    chmod 0440 /etc/sudoers.d/openlesmillscinema
-    if ! visudo -c -f /etc/sudoers.d/openlesmillscinema >/dev/null 2>&1; then
+    chmod 0440 /etc/sudoers.d/bobine
+    if ! visudo -c -f /etc/sudoers.d/bobine >/dev/null 2>&1; then
         warn "Fichier sudoers généré invalide, suppression (le bouton de reset ne fonctionnera pas)"
-        rm -f /etc/sudoers.d/openlesmillscinema
+        rm -f /etc/sudoers.d/bobine
     else
         ok "règle sudoers validée par visudo"
     fi
@@ -947,20 +947,20 @@ step_done
 # ---------------------------------------------------------------------------
 step "URL locale (mDNS) & redirection du port 80"
 # ---------------------------------------------------------------------------
-# - avahi (mDNS) publie "openlesmillscinema.local" sur le LAN sans toucher au
+# - avahi (mDNS) publie "bobine.local" sur le LAN sans toucher au
 #   hostname de la machine ;
 # - une règle nftables redirige le port 80 entrant vers le port applicatif,
 #   pour une URL sans numéro de port depuis téléphone/PC. L'URL historique
 #   http://<IP>:8000 reste fonctionnelle.
-log "Publication du nom mDNS 'openlesmillscinema.local' (avahi)"
+log "Publication du nom mDNS 'bobine.local' (avahi)"
 if $DRY_RUN; then
     echo "  ${DIM}[dry-run]${RESET} configurerait avahi-daemon.conf (host-name, IPv6 désactivé)"
 else
     AVAHI_CONF="/etc/avahi/avahi-daemon.conf"
     if grep -qE '^#?host-name=' "${AVAHI_CONF}"; then
-        sed -i 's/^#\?host-name=.*/host-name=openlesmillscinema/' "${AVAHI_CONF}"
+        sed -i 's/^#\?host-name=.*/host-name=bobine/' "${AVAHI_CONF}"
     else
-        sed -i '/^\[server\]/a host-name=openlesmillscinema' "${AVAHI_CONF}"
+        sed -i '/^\[server\]/a host-name=bobine' "${AVAHI_CONF}"
     fi
     # IPv6 désactivé côté avahi : le paquet Debian publie par défaut
     # use-ipv6=yes, donc une adresse AAAA globale en plus de l'IPv4 — mais
@@ -981,7 +981,7 @@ fi
 run systemctl unmask avahi-daemon.service avahi-daemon.socket >/dev/null 2>&1 || true
 run systemctl enable avahi-daemon >/dev/null 2>&1 || true
 if ! $DRY_RUN && ! systemctl restart avahi-daemon; then
-    warn "Impossible de démarrer avahi-daemon : l'URL openlesmillscinema.local ne sera pas publiée."
+    warn "Impossible de démarrer avahi-daemon : l'URL bobine.local ne sera pas publiée."
     warn "L'accès par adresse IP (http://<IP-du-Wyse>:8000) reste fonctionnel."
 else
     ok "avahi-daemon actif"
@@ -989,7 +989,7 @@ fi
 
 log "Redirection du port 80 vers ${SERVICE_PORT} (nftables)"
 write_file "${CONFIG_DIR}/redirect.nft" <<EOF
-# Généré par install.sh — accès sans numéro de port (http://openlesmillscinema.local).
+# Généré par install.sh — accès sans numéro de port (http://bobine.local).
 # Le triplet create/delete/create rend le rechargement idempotent.
 table ip olmc_redirect
 delete table ip olmc_redirect
@@ -1000,9 +1000,9 @@ table ip olmc_redirect {
     }
 }
 EOF
-write_file /etc/systemd/system/openlesmillscinema-redirect.service <<EOF
+write_file /etc/systemd/system/bobine-redirect.service <<EOF
 [Unit]
-Description=OpenLesmillsCinema - Redirection port 80 vers ${SERVICE_PORT}
+Description=Bobine - Redirection port 80 vers ${SERVICE_PORT}
 After=network-pre.target nftables.service
 
 [Service]
@@ -1022,15 +1022,15 @@ step "Activation des services & vérification de santé"
 # ---------------------------------------------------------------------------
 run systemctl daemon-reload
 if ! $NO_KIOSK; then
-    run systemctl enable --now openlesmillscinema-audio-guard.service
+    run systemctl enable --now bobine-audio-guard.service
 fi
-run systemctl enable --now openlesmillscinema-backend.service
+run systemctl enable --now bobine-backend.service
 if ! $NO_KIOSK; then
-    run systemctl enable --now openlesmillscinema-kiosk.service
+    run systemctl enable --now bobine-kiosk.service
 fi
-run systemctl enable openlesmillscinema-redirect.service >/dev/null 2>&1 || true
-if ! $DRY_RUN && ! systemctl restart openlesmillscinema-redirect.service; then
-    warn "Redirection port 80 -> ${SERVICE_PORT} indisponible (nftables) : utiliser http://openlesmillscinema.local:${SERVICE_PORT}."
+run systemctl enable bobine-redirect.service >/dev/null 2>&1 || true
+if ! $DRY_RUN && ! systemctl restart bobine-redirect.service; then
+    warn "Redirection port 80 -> ${SERVICE_PORT} indisponible (nftables) : utiliser http://bobine.local:${SERVICE_PORT}."
 fi
 
 if ! $DRY_RUN; then
@@ -1046,7 +1046,7 @@ if ! $DRY_RUN; then
     if $HEALTHY; then
         ok "API backend en ligne sur le port ${SERVICE_PORT}"
     else
-        warn "L'API backend ne répond pas encore après 20s — vérifie : journalctl -u openlesmillscinema-backend -n 50"
+        warn "L'API backend ne répond pas encore après 20s — vérifie : journalctl -u bobine-backend -n 50"
     fi
 fi
 step_done
@@ -1056,22 +1056,22 @@ step_done
 # ---------------------------------------------------------------------------
 echo
 box_top
-box_line "  OpenLesmillsCinema — installation terminée"
+box_line "  Bobine — installation terminée"
 box_mid
-box_line "  Admin      http://openlesmillscinema.local"
+box_line "  Admin      http://bobine.local"
 box_line "             http://127.0.0.1:${SERVICE_PORT}  (et http://<IP>:${SERVICE_PORT})"
 if ! $NO_KIOSK; then
     box_line "  Kiosk      ${KIOSK_URL}"
 fi
 box_line "  Config     ${CONFIG_FILE}"
 box_line "  Journal    ${LOG_FILE}"
-box_line "  Contrôle   openlesmillscinema {start|stop|restart|status|logs}"
+box_line "  Contrôle   bobine {start|stop|restart|status|logs}"
 box_line "  Diagnostic sudo ./${SCRIPT_NAME} --check"
 box_bottom
 echo
 
 if ! $DRY_RUN; then
-    systemctl --no-pager --lines=0 status openlesmillscinema-backend.service $($NO_KIOSK || echo openlesmillscinema-kiosk.service) 2>/dev/null || true
+    systemctl --no-pager --lines=0 status bobine-backend.service $($NO_KIOSK || echo bobine-kiosk.service) 2>/dev/null || true
 fi
 
 if ! $NO_KIOSK; then

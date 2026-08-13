@@ -30,9 +30,9 @@ Sûreté
 
 À lancer **backend arrêté** :
 
-    sudo systemctl stop openlesmillscinema-backend
+    sudo systemctl stop bobine-backend
     backend/.venv/bin/python scripts/migrate_unify_data_dirs.py [--dry-run]
-    sudo systemctl start openlesmillscinema-backend
+    sudo systemctl start bobine-backend
 """
 from __future__ import annotations
 

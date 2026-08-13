@@ -1,7 +1,7 @@
-# Configuration OpenLesmillsCinema
+# Configuration Bobine
 #
 # En développement, ce fichier est lu depuis la racine de backend/.
-# En production (Lot 14), il est remplacé par /etc/openlesmillscinema/config.toml.
+# En production (Lot 14), il est remplacé par /etc/bobine/config.toml.
 # Les chemins relatifs ci-dessous sont résolus par rapport à la racine du projet backend/.
 
 [server]

@@ -8,9 +8,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-os.environ["OPENLESMILLS_DATABASE_URL"] = "sqlite:///data/test_audio_database.db"
-os.environ["OPENLESMILLS_AUDIO_DIR"] = "data/test_audio"
-os.environ["OPENLESMILLS_AUDIO_WATCH_DIR"] = "data/test_audio_watched"
+os.environ["BOBINE_DATABASE_URL"] = "sqlite:///data/test_audio_database.db"
+os.environ["BOBINE_AUDIO_DIR"] = "data/test_audio"
+os.environ["BOBINE_AUDIO_WATCH_DIR"] = "data/test_audio_watched"
 
 from app.config import settings
 from app.database import init_db, SessionLocal

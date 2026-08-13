@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# restore.sh — Restauration d'une sauvegarde OpenLesmillsCinema (réf. NF7, tâche 15.6).
+# restore.sh — Restauration d'une sauvegarde Bobine (réf. NF7, tâche 15.6).
 #
 # Usage :
-#   sudo openlesmillscinema stop        # arrêter le service avant de toucher aux fichiers
+#   sudo bobine stop        # arrêter le service avant de toucher aux fichiers
 #   ./scripts/restore.sh <archive.tar.gz>
-#   sudo openlesmillscinema start
+#   sudo bobine start
 #
 set -euo pipefail
 
@@ -18,9 +18,9 @@ warn() { echo -e "\033[1;33m!! $*\033[0m" >&2; }
 
 [[ -f "${ARCHIVE}" ]] || { echo "Archive introuvable : ${ARCHIVE}" >&2; exit 1; }
 
-if systemctl is-active --quiet openlesmillscinema-backend 2>/dev/null; then
-    warn "openlesmillscinema-backend semble actif — arrête le service avant de restaurer"
-    warn "(risque d'écraser la base pendant qu'un processus l'a ouverte) : 'openlesmillscinema stop'"
+if systemctl is-active --quiet bobine-backend 2>/dev/null; then
+    warn "bobine-backend semble actif — arrête le service avant de restaurer"
+    warn "(risque d'écraser la base pendant qu'un processus l'a ouverte) : 'bobine stop'"
     read -rp "Continuer quand même ? [y/N] " confirm
     [[ "${confirm}" == "y" || "${confirm}" == "Y" ]] || exit 1
 fi
@@ -62,7 +62,7 @@ else
 fi
 
 if [[ -f "${WORK_DIR}/config.toml" ]]; then
-    CONFIG_DEST="/etc/openlesmillscinema/config.toml"
+    CONFIG_DEST="/etc/bobine/config.toml"
     if [[ -w "$(dirname "${CONFIG_DEST}")" || -w "${CONFIG_DEST}" ]] 2>/dev/null; then
         log "Restauration de la configuration vers ${CONFIG_DEST}"
         mkdir -p "$(dirname "${CONFIG_DEST}")"
@@ -82,5 +82,5 @@ for key in media_dir backgrounds_dir audio_dir thumbnails_dir radio_dir radio_co
 done
 
 echo
-echo "Restauration terminée. Relance le service : 'openlesmillscinema start'"
+echo "Restauration terminée. Relance le service : 'bobine start'"
 echo "Une copie de sécurité de l'ancienne base (si présente) a été laissée à côté : ${DB_PATH}.avant-restauration.*"

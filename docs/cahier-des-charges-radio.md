@@ -1,6 +1,6 @@
 # Cahier des charges — Module Radio
 
-> Ajout d'un sous-système **Radio** à OpenLesmillsCinema : diffusion musicale
+> Ajout d'un sous-système **Radio** à Bobine : diffusion musicale
 > d'ambiance « type Spotify » sur un poste dédié, avec bibliothèque musicale,
 > playlists, pochettes, rappels de bienséance intercalés, fonctionnement 24/7
 > et pilotage à distance depuis l'admin (mobile + PC).

@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     radio_autostart_on_boot: bool = True
 
     class Config:
-        env_prefix = "OPENLESMILLS_"
+        env_prefix = "BOBINE_"
 
     @property
     def technical_log_path(self) -> Path:
@@ -81,11 +81,11 @@ class Settings(BaseSettings):
 def load_settings() -> Settings:
     # Chemin potentiel local et global
     local_config = ROOT_DIR / "config.toml"
-    global_config = Path("/etc/openlesmillscinema/config.toml")
+    global_config = Path("/etc/bobine/config.toml")
 
     # La config de production (/etc) prime sur celle du dépôt (réf. F7.4) :
     # config.toml est versionné avec des valeurs de dev, donc toujours présent
-    # après un clone — s'il primait, /etc/openlesmillscinema/config.toml ne
+    # après un clone — s'il primait, /etc/bobine/config.toml ne
     # servirait jamais une fois le dépôt cloné sur la machine de production.
     config_path = None
     if global_config.exists():
@@ -110,7 +110,7 @@ def load_settings() -> Settings:
         else:
             flat_config[section_key] = section_val
 
-    # Une variable d'environnement OPENLESMILLS_<CHAMP> doit pouvoir surcharger
+    # Une variable d'environnement BOBINE_<CHAMP> doit pouvoir surcharger
     # une valeur du TOML (utilisé par les tests pour isoler leurs données —
     # cf. tests/test_*.py). pydantic-settings ne le fait PAS automatiquement
     # ici : passer le TOML en kwargs explicites à Settings(**flat_config)
@@ -120,11 +120,11 @@ def load_settings() -> Settings:
     # probable des disparitions de `data/database.db` documentées aux Lots
     # 4/5/6 (un test croyant nettoyer sa propre base isolée en tearDown
     # supprimait en fait la vraie base partagée, faute de surcharge effective
-    # de OPENLESMILLS_DATABASE_URL). On retire donc du dict tout champ pour
+    # de BOBINE_DATABASE_URL). On retire donc du dict tout champ pour
     # lequel la variable d'environnement correspondante est définie, et on
     # laisse BaseSettings la lire nativement via env_prefix.
     for field_name in list(flat_config.keys()):
-        if f"OPENLESMILLS_{field_name.upper()}" in os.environ:
+        if f"BOBINE_{field_name.upper()}" in os.environ:
             del flat_config[field_name]
 
     # Instancier Settings avec les valeurs du TOML (sauf celles surchargées par l'environnement)

@@ -1,7 +1,7 @@
 {
-  "name": "OpenLesmillsCinema — Administration",
-  "short_name": "LM Cinema",
-  "description": "Télécommande et administration du cinéma Les Mills",
+  "name": "Bobine — Administration",
+  "short_name": "Bobine",
+  "description": "Télécommande et administration du cinéma",
   "start_url": "/",
   "display": "fullscreen",
   "display_override": ["fullscreen", "standalone"],
