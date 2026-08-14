@@ -15,6 +15,7 @@ from app.models import (
     Playlist,
     PlaybackState,
     RadioPlaylist,
+    RadioTrack,
     Schedule,
     ScheduleOverride,
     ScheduleTargetType,
@@ -237,6 +238,31 @@ async def _launch_radio_target(db: Session, playlist_id: int) -> None:
     await get_radio_manager().load_playlist(playlist.id, playlist.name, tracks, repeat="playlist")
 
 
+async def _launch_radio_shuffle_all(db: Session) -> str | None:
+    """Ambiance par défaut « de secours » : joue TOUTE la bibliothèque radio,
+    mélangée et en boucle infinie. Utilisé quand AUCUNE RadioPlaylist n'est
+    marquée `is_default`, pour ne jamais laisser la radio muette (réf. demande
+    user : « éviter de devoir créer une playlist et de se retrouver sans
+    musique »).
+
+    Playlist VIRTUELLE (playlist_id=None, comme la commande `radio_shuffle_all`
+    de routers/playback.py) : rien n'est persisté en base, la liste est
+    recomposée à chaque lancement — elle reflète donc toujours l'état courant de
+    la bibliothèque, sans playlist figée à resynchroniser à chaque import.
+    Renvoie le nom lancé, ou None si la bibliothèque est vide."""
+    from app.radio_manager import get_radio_manager
+
+    tracks = [_radio_track_dict(t) for t in db.query(RadioTrack).all()]
+    if not tracks:
+        return None
+    # shuffle=True + repeat="playlist" : aléatoire ET boucle infinie (deux
+    # réglages indépendants côté RadioPlaybackManager), comme `radio_shuffle_all`.
+    await get_radio_manager().load_playlist(
+        None, "Toute la bibliothèque", tracks, shuffle=True, repeat="playlist",
+    )
+    return "Toute la bibliothèque"
+
+
 async def autostart_default_radio_playlist() -> None:
     """Auto-démarrage au boot (réf. lot L7, D10) : si le canal radio est au
     repos et `radio_autostart_on_boot` est actif, charge la playlist
@@ -258,6 +284,15 @@ async def autostart_default_radio_playlist() -> None:
         if default_playlist:
             logger.info(f"Auto-démarrage radio : playlist d'ambiance par défaut « {default_playlist.name} »")
             await _launch_radio_target(db, default_playlist.id)
+        else:
+            # Aucune playlist marquée par défaut : plutôt que de rester muet, on
+            # démarre toute la bibliothèque en aléatoire/boucle (réf. demande
+            # user). Overridable : dès qu'une playlist est marquée `is_default`,
+            # la branche ci-dessus reprend la priorité au prochain démarrage.
+            if await _launch_radio_shuffle_all(db):
+                logger.info("Auto-démarrage radio : aucune playlist par défaut → toute la bibliothèque en aléatoire")
+            else:
+                logger.info("Auto-démarrage radio : bibliothèque vide, rien à lancer")
     finally:
         db.close()
 
@@ -271,7 +306,11 @@ async def _revert_radio_to_default(db: Session) -> None:
     if default_playlist:
         await _launch_radio_target(db, default_playlist.id)
     else:
-        await get_radio_manager().stop()
+        # Même repli qu'à l'auto-boot : fin de fenêtre radio → toute la
+        # bibliothèque en aléatoire plutôt que le silence ; stop seulement si la
+        # bibliothèque est vide.
+        if not await _launch_radio_shuffle_all(db):
+            await get_radio_manager().stop()
 
 
 async def _launch_target(

@@ -946,10 +946,13 @@ export default function RadioLibraryPage() {
                   onChange={(e) => setEditingPlaylist({ ...editingPlaylist, name: e.target.value })}
                   onBlur={() => savePlaylist(editingPlaylist.id, editingPlaylist.name, editingPlaylist.items.map((i) => i.track.id))} /></div>
 
-              <button type="button" className={`btn ${editingPlaylist.is_default ? "btn-primary" : "btn-secondary"}`} style={{ marginBottom: "16px" }} onClick={toggleDefault}>
+              <button type="button" className={`btn ${editingPlaylist.is_default ? "btn-primary" : "btn-secondary"}`} style={{ marginBottom: "8px" }} onClick={toggleDefault}>
                 <Icon name="star" size={16} filled={editingPlaylist.is_default} />
                 {editingPlaylist.is_default ? t("radioLibrary.unsetDefault") : t("radioLibrary.setDefault")}
               </button>
+              <p style={{ fontSize: "13px", opacity: 0.65, lineHeight: 1.4, margin: "0 0 16px" }}>
+                {t("radioLibrary.defaultHint")}
+              </p>
 
               <h4 className="rl-drawer-subhead">
                 {t("radioLibrary.itemsInPlaylist", { count: editingPlaylist.items.length })}
