@@ -6,6 +6,7 @@ Bobine turns a low-cost dedicated mini PC into a complete in-club video system: 
 
 [Français](README.fr.md) · [Technical documentation](docs/ARCHITECTURE.md)
 
+[![CI](https://github.com/FantasmaGlad/Bobine/actions/workflows/ci.yml/badge.svg)](https://github.com/FantasmaGlad/Bobine/actions/workflows/ci.yml)
 ![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue)
 ![Backend: FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688)
 ![Frontend: Next.js](https://img.shields.io/badge/Frontend-Next.js-000000)
@@ -64,7 +65,7 @@ For the full architecture, data model, network contract and API reference, see *
 - An **x86-64 mini PC or thin client** (reference target: Dell Wyse 5070, Intel Gemini Lake). Any small Debian-capable PC with an Intel iGPU works; hardware video decoding is used when available.
 - **4 GB RAM** minimum, a few GB of disk for the app plus room for your video library.
 - **One or two screens** (HDMI for the wired output; the networked screen is any device with a browser).
-- A **local network** (wired recommended for the video screens).
+- A **local Wi-Fi network** (a router or access point) to reach the other devices — the networked second screen, the mobile remote and the radio player all connect over the local network. It needs **no internet** and keeps working even if your internet connection drops: the LAN alone is enough. Bobine can also run **fully offline with no network at all**, but then only the single wired (HDMI) screen is used.
 
 Internet is only needed once, to install the operating system and the software.
 

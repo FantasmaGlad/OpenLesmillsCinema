@@ -6,6 +6,7 @@ Bobine transforme un mini PC dédié bon marché en système vidéo complet pour
 
 [English](README.md) · [Documentation technique](docs/ARCHITECTURE.md)
 
+[![CI](https://github.com/FantasmaGlad/Bobine/actions/workflows/ci.yml/badge.svg)](https://github.com/FantasmaGlad/Bobine/actions/workflows/ci.yml)
 ![Licence : AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue)
 ![Backend : FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688)
 ![Frontend : Next.js](https://img.shields.io/badge/Frontend-Next.js-000000)
@@ -64,7 +65,7 @@ Pour l'architecture complète, le modèle de données, le contrat réseau et la 
 - Un **mini PC ou thin client x86-64** (cible de référence : Dell Wyse 5070, Intel Gemini Lake). Tout petit PC compatible Debian avec un iGPU Intel convient ; le décodage vidéo matériel est utilisé si disponible.
 - **4 Go de RAM** minimum, quelques Go de disque pour l'application plus l'espace de votre bibliothèque vidéo.
 - **Un ou deux écrans** (HDMI pour la sortie câblée ; l'écran réseau est n'importe quel appareil avec un navigateur).
-- Un **réseau local** (filaire recommandé pour les écrans de diffusion).
+- Un **réseau local Wi-Fi** (un routeur ou point d'accès) pour joindre les autres appareils — le second écran réseau, la télécommande mobile et le lecteur radio se connectent tous sur le réseau local. Il ne demande **aucune connexion internet** et continue de fonctionner même si votre accès internet tombe : le réseau local seul suffit. Bobine peut aussi tourner **totalement hors ligne, sans aucun réseau**, mais seul l'unique écran câblé (HDMI) est alors utilisé.
 
 Internet n'est nécessaire qu'une seule fois, pour installer le système d'exploitation et le logiciel.
 
