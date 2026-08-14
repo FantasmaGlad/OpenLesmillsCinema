@@ -29,7 +29,10 @@ Ce document est écrit pour quiconque souhaite **comprendre, exploiter, modifier
 
 - **Backend** : Python 3.11+, [FastAPI](https://fastapi.tiangolo.com/) + `uvicorn` (4 workers), [SQLAlchemy](https://www.sqlalchemy.org/), SQLite (`data/database.db`), Redis (bus d'état Pub/Sub, verrous distribués), `APScheduler` (planification), `watchdog` (surveillance des dossiers d'import), `ffmpeg` / VA-API (décodage matériel Intel ou AMD, pilote choisi selon le GPU détecté), Web Audio API (crossfade radio, côté navigateur).
 - **Frontend** : [Next.js](https://nextjs.org/) 16 (App Router, export statique servi par le backend en production), React 19, TypeScript, CSS Vanilla (global + design tokens, **13 thèmes de couleurs** commutables à chaud via `:root[data-theme=…]`), PWA (`manifest.json`), WebSockets, glisser-déposer natif (HTML5), Web Audio API.
-- **Exploitation & Kiosque** : Debian 13 (Trixie), Chromium en mode kiosque (X11 / `xinit`), `systemd` (services backend, kiosque, garde audio), `avahi-daemon` (découverte mDNS).
+- **Exploitation & Kiosque** : Debian 13 (Trixie), Chromium en mode kiosque (X11 / `xinit`), `systemd` (services backend, kiosque, garde audio, chien de garde), `avahi-daemon` (découverte mDNS).
+- **Installation & outils** : `install.sh` (**Bash** idempotent : détection matérielle dynamique, remédiation APT, `--as-user`, sortie machine `--progress=json`, §7) ; **assistant d'installation graphique** en cours de construction (`assistant/`, cœur **Rust** testable qui parse la sortie de `install.sh` et orchestre le déploiement SSH — cf. [`cahier-des-charges-installeur.md`](cahier-des-charges-installeur.md) et [`assistant/README.md`](../assistant/README.md)).
+
+**Langages du dépôt** : **Python** (backend FastAPI), **TypeScript/React** (frontend Next.js), **Bash** (`install.sh`), **Rust** (cœur de l'assistant d'installation). **Intégration continue** (GitHub Actions, `.github/workflows/ci.yml`) à chaque push/PR : build du frontend, contrôle de syntaxe du backend, `cargo clippy` + `cargo test` de l'assistant, et sanity de `install.sh` (syntaxe + cohérence du compteur d'étapes).
 
 ### Développements locaux
 
@@ -59,6 +62,9 @@ backend/.venv/bin/python -c "import ast; ast.parse(open('backend/app/main.py').r
 
 # Vérification du typage Frontend (TypeScript)
 cd frontend && npx tsc --noEmit
+
+# Tests du cœur de l'assistant d'installation (Rust) — mêmes checks qu'en CI
+cd assistant && cargo test --workspace
 ```
 
 ### Configuration (`config.toml`)
@@ -197,6 +203,7 @@ sudo ./install.sh
 | `--skip-packages` | Mise à jour du projet (après déploiement du code, §9) sans réinstaller les paquets `apt` |
 | `--skip-build` | Ne reconstruit pas le frontend Next.js |
 | `--as-user LOGIN` | Compte cible quand le script tourne en **root direct** (Debian **sans sudo**, lancé via `su -`) — cf. ci-dessous |
+| `--progress=json` | Sortie **machine** : une ligne JSON par évènement (`run_begin` / `step` `start\|ok\|skip\|error` / `run_end`) sur le **fd 3**, pour piloter une barre de progression (assistant graphique). Le journal humain reste inchangé — cf. « Assistant d'installation » ci-dessous |
 | `--uninstall [--purge] [--purge-data]` | Désinstallation progressive du système |
 
 **Détection matérielle dynamique** (réf. [`cahier-des-charges-installeur.md`](cahier-des-charges-installeur.md)) : l'installateur ne suppose plus un GPU Intel. Il détecte le GPU (`lspci`) et le CPU (`lscpu`) et installe les paquets adaptés — **Intel** : `intel-media-va-driver-non-free` (repli `i965-va-driver`) ; **AMD/Ryzen** : `mesa-va-drivers` + `firmware-amd-graphics` ; **NVIDIA** : décodage logiciel + avertissement — plus le **microcode** (`amd64-microcode`/`intel-microcode`) et le firmware Wi-Fi si une interface sans fil est présente. Les paquets non libres exigeant des composants APT absents (`non-free`, `non-free-firmware`, séparés depuis Debian 12) sont gérés en **activant ces composants** au besoin (sauvegarde `.bobine.bak` des sources).
@@ -214,6 +221,14 @@ sudo ./install.sh
 **Contrôle de santé** — `GET /api/health` renvoie `{"status": "ok"|"degraded", "components": {"redis", "database", "kiosk"}}`, avec HTTP `200` si Redis ET la base répondent, sinon `503` (l'état du kiosque est indicatif et n'affecte pas le code HTTP). C'est le point consommé par le watchdog ci-dessus et par toute supervision externe.
 
 Pas de service dédié pour le canal Radio (arbitrage A5, cf. §5) : `/radio` s'ouvre à la main dans un navigateur, sur le même backend.
+
+### Assistant d'installation graphique (fondations)
+
+Objectif : rendre l'installation « clic-clic » pour un exploitant non technicien. Une application tourne sur le **portable de l'admin**, localise le mini PC sur le LAN, s'y connecte en SSH, détecte le matériel, puis **déroule `install.sh`** avec une barre de progression. `install.sh` reste la **source de vérité unique** — l'assistant l'**orchestre**, il ne réimplémente rien. Cahier des charges complet : [`cahier-des-charges-installeur.md`](cahier-des-charges-installeur.md).
+
+État actuel — **fondations livrées et testables sans IHM** :
+- Côté `install.sh` : détection matérielle dynamique (§7 ci-dessus), remédiation APT, `--as-user` (amorçage sans `sudo`, pour un Debian minimal) et `--progress=json` (protocole de suivi machine).
+- Côté `assistant/` : cœur **Rust** (`bobine-installer-core`), logique pure couverte par `cargo test` — parseur du flux `--progress=json`, constructeur de la commande distante (`sudo` ou `su - --as-user`, sans jamais embarquer de mot de passe), calcul du sous-réseau à sonder, arbre de décision `sudo`/`su`. L'IHM Tauri et le transport SSH/mDNS réels sont le jalon suivant. Détails : [`assistant/README.md`](../assistant/README.md).
 
 ### Autorisation sudo restreinte & désinstallation depuis l'interface
 

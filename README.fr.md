@@ -157,6 +157,7 @@ Ajoutez `--purge-data` pour retirer aussi les médias importés (irréversible).
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — référence technique : architecture, modèle de données, contrat réseau, référence API et WebSocket, services systemd, exploitation à distance.
 - **[docs/cahier-des-charges-radio.md](docs/cahier-des-charges-radio.md)** — spécification complète du sous-système radio.
+- **[docs/cahier-des-charges-installeur.md](docs/cahier-des-charges-installeur.md)** — spécification de l'assistant d'installation graphique et fondations CLI déjà en place. Cœur de l'assistant (Rust) : [`assistant/`](assistant/).
 
 ---
 
@@ -168,4 +169,4 @@ Bobine est un logiciel libre sous licence **GNU Affero General Public License v3
 
 ## État et feuille de route
 
-Bobine est utilisé en production sur du matériel dédié. Prévu : un site web dédié et une documentation étendue. Les tickets et contributions sont bienvenus sur le [dépôt GitHub](https://github.com/FantasmaGlad/Bobine).
+Bobine est utilisé en production sur du matériel dédié. Prévu : un assistant d'installation graphique (fondations CLI déjà en place), un site web dédié et une documentation étendue. Les tickets et contributions sont bienvenus sur le [dépôt GitHub](https://github.com/FantasmaGlad/Bobine).

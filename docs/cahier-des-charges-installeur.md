@@ -180,27 +180,45 @@ Une install minimale peut manquer de composants ou de sources :
 
 - L'assistant exécute `install.sh` **en non interactif** (`-y`), en streamant sa
   sortie via SSH.
-- **Protocole de progression** : `install.sh` émet déjà des étapes lisibles
-  (`step`/`step_done`). Pour un suivi FIABLE (barre + pourcentage), ajouter un
-  mode **sortie structurée** (ex. `--progress=json` imprimant une ligne par
-  évènement : `{"step":"packages","status":"start|ok|error","pct":42}`).
-  L'assistant parse ces lignes → barre + libellé courant + journal détaillé
-  repliable.
+- **Protocole de progression** (implémenté) : `install.sh --progress=json`
+  émet **une ligne JSON compacte par évènement**, versionnée par la clé de tête
+  `"bobine":1` (le consommateur filtre `^\{"bobine":`). Les lignes sortent sur
+  le **fd 3** (stdout d'origine, préservé avant la redirection vers `tee`) :
+  elles atteignent l'assistant par le même canal SSH **sans polluer le fichier
+  journal humain**. Le journal lisible reste identique sur stdout (journal
+  détaillé repliable côté IHM).
+  - Astuce SSH : **allouer un PTY** pour un flush ligne à ligne.
+  - Évènements et schéma :
+    - `run_begin` : `{version,total,user,repo,log,mode:"kiosk|server",dry_run}`.
+    - `step` (2 par étape) : `{status:"start|ok|skip|error", step, total, pct,
+      slug, title[, detail]}`. `slug` est un identifiant **stable** (`packages`,
+      `gpu-access`, `python-env`, `frontend-build`, `config`, `cli-tool`,
+      `uninstaller`, `backend-service`, `kiosk`, `audio`, `sudoers`, `ntp`,
+      `mdns-redirect`, `watchdog`, `activation`) — mapper icônes/i18n dessus,
+      pas sur `title` (prose FR susceptible d'évoluer). `pct` est monotone :
+      le `start` d'une étape vaut le `pct` de clôture de la précédente.
+    - `run_end` : `{status:"ok|error", pct:100|…, total, healthy, url, port,
+      dry_run}` (succès) ou `{status:"error", rc, step, total}` (échec, émis
+      par le trap `on_error` juste après un `step:error`).
+  - Toutes les valeurs dynamiques (chemins, login, titres) sont échappées JSON.
+  - L'assistant parse ces lignes → barre + libellé courant + journal repliable.
 - **Fin** : l'assistant attend `GET /api/health == 200` (déjà fait par
   `install.sh`) et affiche le récap + l'URL.
 
 ## 11. Modifications requises côté `install.sh` (pour l'assistant)
 
-À trancher, mais recommandées (et bénéfiques aussi à la CLI) :
+Les quatre premiers points sont **livrés** (fondations J1, cf. §14) et déjà
+utiles à la CLI :
 
-1. **Détection matérielle intégrée** (§8) : choisir le driver VA-API + microcode
+1. ✅ **Détection matérielle intégrée** (§8) : choix du driver VA-API + microcode
    selon le GPU/CPU réels, au lieu de l'Intel en dur.
-2. **Remédiation des composants APT** (§9) : activer `non-free-firmware` etc. si
-   requis par le matériel.
-3. **`--as-user <login>`** (§7, option B) : autoriser l'exécution en root en
+2. ✅ **Remédiation des composants APT** (§9) : `ensure_apt_components` active
+   `contrib non-free non-free-firmware` si requis par le matériel.
+3. ✅ **`--as-user <login>`** (§7, option B) : exécution en root direct en
    fournissant explicitement le compte cible, pour l'amorçage sans `sudo`.
-4. **`--progress=json`** (§10) : sortie machine pour la barre de progression.
-5. (Optionnel) `--assume-network-checked` / pré-staging pour les cas hors-ligne.
+4. ✅ **`--progress=json`** (§10) : sortie machine (fd 3) pour la barre de
+   progression.
+5. (Optionnel, non fait) `--assume-network-checked` / pré-staging hors-ligne.
 
 Ces points peuvent être livrés **indépendamment de l'assistant** : ils
 améliorent déjà la CLI et sont la fondation technique de l'IHM.
@@ -226,9 +244,9 @@ améliorent déjà la CLI et sont la fondation technique de l'IHM.
 
 ## 14. Livrables et jalons
 
-- **J1 — Fondations CLI** : `install.sh` gagne la détection matérielle (§8), la
-  remédiation APT (§9), `--as-user` (§7) et `--progress=json` (§10). Testable
-  sans IHM.
+- **J1 — Fondations CLI** ✅ : `install.sh` a gagné la détection matérielle
+  (§8), la remédiation APT (§9), `--as-user` (§7) et `--progress=json` (§10).
+  Testable sans IHM.
 - **J2 — Assistant minimal** : découverte réseau + SSH + amorçage privilèges +
   exécution avec barre de progression (chemin heureux).
 - **J3 — Robustesse** : détection/récap matériel à l'écran, remédiation guidée,

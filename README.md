@@ -157,6 +157,7 @@ Add `--purge-data` to also remove imported media (irreversible). Shared system p
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — technical reference: architecture, data model, network contract, API and WebSocket reference, systemd services, remote operation.
 - **[docs/cahier-des-charges-radio.md](docs/cahier-des-charges-radio.md)** — full specification of the radio subsystem (French).
+- **[docs/cahier-des-charges-installeur.md](docs/cahier-des-charges-installeur.md)** — specification of the graphical installer assistant and the CLI foundations already in place (French). Assistant core (Rust): [`assistant/`](assistant/).
 
 ---
 
@@ -168,4 +169,4 @@ Bobine is free software licensed under the **GNU Affero General Public License v
 
 ## Status and roadmap
 
-Bobine is in active use in production on dedicated hardware. Planned: a dedicated project website and expanded documentation. Issues and contributions are welcome on the [GitHub repository](https://github.com/FantasmaGlad/Bobine).
+Bobine is in active use in production on dedicated hardware. Planned: a graphical installer assistant (CLI foundations already in place), a dedicated project website and expanded documentation. Issues and contributions are welcome on the [GitHub repository](https://github.com/FantasmaGlad/Bobine).
