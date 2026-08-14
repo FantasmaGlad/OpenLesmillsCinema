@@ -18,13 +18,29 @@ import { useEffect, useRef, useState } from "react";
  * de playlist...) : seul le premier cas est lissé sans jamais reculer : les
  * autres causes sont toujours appliquées telles quelles, y compris vers
  * l'arrière (ex. une recherche en arrière sur la barre de progression).
+ *
+ * Correctif "le minuteur tourne dans le vide à l'infini" (réf. retour user,
+ * radio) : si le flux réel se bloque (hoquet réseau) sans jamais déclencher
+ * `ended`/`error`, plus aucun rapport de position n'arrive alors que `playing`
+ * reste vrai côté serveur — sans garde-fou, l'extrapolation ci-dessous
+ * continuait indéfiniment à partir de la dernière position connue, donnant
+ * l'illusion d'une lecture qui avance alors que le son s'est tu. Passé
+ * `MAX_EXTRAPOLATION_MS` sans nouveau rapport, on gèle l'affichage au lieu
+ * d'inventer du temps qui ne s'écoule plus réellement — un signal honnête,
+ * complémentaire de la récupération active côté lecteur (`/radio/page.tsx`).
  */
+const MAX_EXTRAPOLATION_MS = 6000;
 export function useInterpolatedPosition(
   serverPosition: number,
   playing: boolean,
   cause: string,
 ): number {
-  const baselineRef = useRef({ value: serverPosition, receivedAt: Date.now() });
+  // 0 plutôt que Date.now() ici : un useRef() est réévalué à chaque rendu même
+  // si React n'utilise le résultat qu'au tout premier (règle react-hooks/purity
+  // — pas d'appel impur pendant le rendu). Sans incidence : le premier effet
+  // ci-dessous, qui APPELLE Date.now() dans un effet (donc hors rendu, permis),
+  // écrase cette valeur dès le premier rapport serveur reçu.
+  const baselineRef = useRef({ value: serverPosition, receivedAt: 0 });
   const [display, setDisplay] = useState(serverPosition);
 
   useEffect(() => {
@@ -42,7 +58,8 @@ export function useInterpolatedPosition(
     if (!playing) return;
     const id = setInterval(() => {
       const { value, receivedAt } = baselineRef.current;
-      setDisplay(value + (Date.now() - receivedAt) / 1000);
+      const elapsedMs = Math.min(Date.now() - receivedAt, MAX_EXTRAPOLATION_MS);
+      setDisplay(value + elapsedMs / 1000);
     }, 200);
     return () => clearInterval(id);
   }, [playing]);

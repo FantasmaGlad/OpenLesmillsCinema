@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useAppSettings } from "@/lib/AppSettingsContext";
 import { useInterpolatedPosition } from "@/lib/useInterpolatedPosition";
 import { RadioEvent, RadioRepeatMode, RadioTrackInfo, useRadioSocket } from "@/lib/useRadioSocket";
@@ -91,6 +91,25 @@ export default function RadioScreenPage() {
   const slotTrackIdRef = useRef<[number | null, number | null]>([null, null]);
   const crossfadingRef = useRef(false);
 
+  // Détection de flux bloqué (réf. retour user "la radio se coupe... le
+  // minuteur tourne dans le vide à l'infini") : un hoquet réseau (Wi-Fi de la
+  // salle) peut arrêter la progression du flux SANS jamais déclencher `ended`
+  // ni `error` côté <audio> — la radio restait alors silencieuse
+  // indéfiniment, pendant que useInterpolatedPosition continuait d'extrapoler
+  // un temps qui ne s'écoulait plus réellement (cap ajouté dans ce hook).
+  // `timeupdate` natif du slot ACTIF est notre seul signal de vie fiable.
+  // `unlockedRef`/`playingRef` reflètent l'état React dans des refs (même
+  // patron que `isPrimaryRef` ci-dessous) pour rester lisibles depuis le
+  // watchdog/les handlers, qui ne doivent jamais fermer sur un rendu périmé.
+  // 0 plutôt que Date.now() ici (règle react-hooks/purity — pas d'appel
+  // impur pendant le rendu) : sans incidence, `loadDirect`/`startCrossfade`/
+  // `handleTimeUpdateForSlot` (tous hors rendu) posent un vrai timestamp bien
+  // avant que le watchdog ci-dessous ne fasse sa première vérification (5s).
+  const lastProgressRef = useRef<[number, number]>([0, 0]);
+  const recoveringRef = useRef(false);
+  const unlockedRef = useRef(false);
+  const playingRef = useRef(false);
+
   const activeAnnouncementRef = useRef<{ id: number; mode: string } | null>(null);
   // Fondu d'entrée/sortie du RAPPEL LUI-MÊME (réf. correctif "vitesse de fade
   // réglable" — jusqu'ici seule la musique de fond était atténuée en mode
@@ -172,6 +191,7 @@ export default function RadioScreenPage() {
     const el = getAudioEl(slot);
     if (!el) return;
     slotTrackIdRef.current[slot] = track.id;
+    lastProgressRef.current[slot] = Date.now(); // laisse une vraie fenêtre de grâce à ce chargement
     el.src = getApiUrl(`/radio/tracks/${track.id}/stream`);
     el.load();
     setGainNow(slot, volumePercent / 100);
@@ -202,6 +222,7 @@ export default function RadioScreenPage() {
     if (!toEl || !audioCtxRef.current) return;
     crossfadingRef.current = true;
     slotTrackIdRef.current[toSlot] = nextTrack.id;
+    lastProgressRef.current[toSlot] = Date.now();
     toEl.src = getApiUrl(`/radio/tracks/${nextTrack.id}/stream`);
     toEl.currentTime = 0;
     setGainNow(toSlot, 0);
@@ -355,6 +376,12 @@ export default function RadioScreenPage() {
   useEffect(() => {
     isPrimaryRef.current = isPrimary;
   }, [isPrimary]);
+  useEffect(() => {
+    unlockedRef.current = unlocked;
+  }, [unlocked]);
+  useEffect(() => {
+    playingRef.current = state.playing;
+  }, [state.playing]);
 
   const livePosition = useInterpolatedPosition(state.position_seconds, state.playing, lastCause);
 
@@ -410,6 +437,7 @@ export default function RadioScreenPage() {
   const handleTimeUpdateForSlot = (slot: Slot) => {
     const el = getAudioEl(slot);
     if (!el || slot !== activeSlotRef.current) return;
+    lastProgressRef.current[slot] = Date.now(); // signe de vie du flux (réf. watchdog de blocage ci-dessous)
     if (isPrimaryRef.current) {
       const nowMs = Date.now();
       if (nowMs - lastReportRef.current >= 900) {
@@ -427,6 +455,75 @@ export default function RadioScreenPage() {
   };
   const handleEndedA = () => handleEndedForSlot(0);
   const handleEndedB = () => handleEndedForSlot(1);
+
+  // ------------------------------------------------------------------
+  // Récupération d'un flux bloqué (réf. retour user "la radio se coupe sans
+  // raison, le minuteur tourne dans le vide à l'infini") : ni `onEnded`
+  // (la piste ne s'est pas vraiment terminée) ni le serveur (rien ne lui dit
+  // que ça a coincé) ne peuvent s'en apercevoir seuls — c'est au lecteur, qui
+  // voit le flux réel, de le détecter et de se réparer. Un seul essai de
+  // rechargement à la même position (souvent suffisant pour un hoquet Wi-Fi
+  // passager) ; si ça ne suffit pas, on traite ça comme une fin de piste pour
+  // que le serveur avance normalement plutôt que de rester bloqué en silence.
+  // ------------------------------------------------------------------
+  const RECOVERY_GRACE_MS = 5000;
+
+  // useCallback (identité stable via `sendCommand`, lui-même stable) : appelée
+  // depuis le watchdog ci-dessous, qui ne doit pas recréer son `setInterval`
+  // à chaque rendu — tout ce qu'elle lit à part `sendCommand` passe par des
+  // refs, donc rien d'autre à lister en dépendance.
+  const attemptRecovery = useCallback((slot: Slot) => {
+    if (recoveringRef.current || slot !== activeSlotRef.current) return;
+    recoveringRef.current = true;
+    const el = getAudioEl(slot);
+    if (el) {
+      const pos = el.currentTime;
+      try {
+        el.load();
+        el.currentTime = pos;
+      } catch {
+        // rattrapé par la vérification de blocage persistant ci-dessous
+      }
+      if (unlockedRef.current) el.play().catch(() => {});
+    }
+    lastProgressRef.current[slot] = Date.now();
+    setTimeout(() => {
+      recoveringRef.current = false;
+      const stillStuck = Date.now() - lastProgressRef.current[slot] >= RECOVERY_GRACE_MS;
+      if (stillStuck && slot === activeSlotRef.current && playingRef.current && !activeAnnouncementRef.current) {
+        sendCommand("radio_track_ended");
+      }
+    }, RECOVERY_GRACE_MS);
+  }, [sendCommand]);
+
+  const handleErrorForSlot = (slot: Slot) => {
+    if (slot === activeSlotRef.current) {
+      attemptRecovery(slot);
+    } else if (crossfadingRef.current) {
+      // La piste préchargée pour le fondu a échoué à charger (hoquet réseau
+      // pile au moment du fondu) : on annule proprement plutôt que de laisser
+      // un fondu à moitié fait — la piste active garde son plein volume, son
+      // `onEnded` naturel déclenchera l'enchaînement normal en fin de piste.
+      abortCrossfadeIfAny(state.volume);
+    }
+  };
+  const handleErrorA = () => handleErrorForSlot(0);
+  const handleErrorB = () => handleErrorForSlot(1);
+
+  // Filet de sécurité pour le cas où le flux se bloque SANS jamais déclencher
+  // `error` (juste plus aucune progression) : vérifie périodiquement que le
+  // slot actif donne encore signe de vie pendant qu'il est censé jouer.
+  const STALL_TIMEOUT_MS = 15000;
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!playingRef.current || activeAnnouncementRef.current || recoveringRef.current) return;
+      const slot = activeSlotRef.current;
+      if (Date.now() - lastProgressRef.current[slot] > STALL_TIMEOUT_MS) {
+        attemptRecovery(slot);
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [attemptRecovery]);
 
   const handleUnlock = () => {
     setUnlocked(true);
@@ -491,8 +588,8 @@ export default function RadioScreenPage() {
 
   return (
     <div className="radio-screen">
-      <audio ref={audioARef} onTimeUpdate={handleTimeUpdateA} onEnded={handleEndedA} />
-      <audio ref={audioBRef} onTimeUpdate={handleTimeUpdateB} onEnded={handleEndedB} />
+      <audio ref={audioARef} onTimeUpdate={handleTimeUpdateA} onEnded={handleEndedA} onError={handleErrorA} />
+      <audio ref={audioBRef} onTimeUpdate={handleTimeUpdateB} onEnded={handleEndedB} onError={handleErrorB} />
       <audio ref={announcementAudioRef} onEnded={() => sendCommand("announcement_ended")} />
 
       {state.current_announcement && (
