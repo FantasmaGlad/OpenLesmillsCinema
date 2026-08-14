@@ -57,6 +57,8 @@ ${BOLD}OPTIONS${RESET}
       --skip-build    Ne reconstruit pas le frontend (suppose frontend/out déjà à jour)
       --as-user LOGIN Compte cible quand le script tourne en root DIRECT (Debian sans sudo, lancé via 'su -').
                         Le kiosk, les fichiers et les groupes GPU appartiendront à ce compte.
+      --progress=json Émet une ligne JSON par étape (sortie machine) pour l'assistant graphique.
+                        Une ligne = un évènement {run_begin|step|run_end} ; le journal humain reste inchangé.
       --check         Diagnostic de l'installation existante, sans rien modifier
       --uninstall     Arrête, désactive et retire tout ce que ce script a installé
       --purge         Avec --uninstall : retire aussi venv/, node_modules/, frontend/out/ et la config
@@ -87,6 +89,8 @@ DO_UNINSTALL=false
 DO_PURGE=false
 DO_PURGE_DATA=false
 VERBOSE=false
+PROGRESS=""
+PROGRESS_JSON=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -97,6 +101,8 @@ while [[ $# -gt 0 ]]; do
         --skip-packages) SKIP_PACKAGES=true ;;
         --skip-build) SKIP_BUILD=true ;;
         --as-user) AS_USER="${2:-}"; shift ;;
+        --progress=*) PROGRESS="${1#*=}" ;;
+        --progress) PROGRESS="${2:-}"; shift ;;
         --check) DO_CHECK=true ;;
         --uninstall) DO_UNINSTALL=true ;;
         --purge) DO_PURGE=true ;;
@@ -106,6 +112,15 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+# --progress=json : sortie machine (une ligne JSON par évènement) pour piloter
+# une barre de progression depuis l'assistant graphique (réf.
+# docs/cahier-des-charges-installeur.md §10). Seule la valeur 'json' est gérée.
+case "${PROGRESS}" in
+    "")     ;;
+    json)   PROGRESS_JSON=true ;;
+    *)      echo "Valeur --progress inconnue : ${PROGRESS} (attendu : json)" >&2; exit 1 ;;
+esac
 
 log()  { printf '\n%s%s▸%s %s\n' "$BOLD" "$CYAN" "$RESET" "$*"; }
 ok()   { printf '  %s %s\n' "$ICON_OK" "$*"; }
@@ -213,25 +228,81 @@ ensure_apt_components() {
     $changed
 }
 
-STEP_TOTAL=13
+# Nombre d'appels à step() ci-dessous (mettre à jour si on en ajoute/retire).
+# Cohérence garantie par la CI (job « install.sh sanity ») qui compare cette
+# valeur à `grep -cE '^\s*step ' install.sh` : un ajout d'étape sans mise à jour
+# ici casse le build (et fausserait le pourcentage de --progress=json).
+STEP_TOTAL=15
 STEP_CUR=0
 STEP_START_TS=0
 CURRENT_STEP_TITLE=""
+CURRENT_STEP_SLUG=""
+STEP_OPEN=false
+
+# ---- Sortie machine (--progress=json) ----------------------------------------
+# Émet une ligne JSON compacte par évènement sur le fd 3 (stdout d'origine,
+# préservé avant la redirection vers tee) : l'assistant graphique la parse pour
+# une barre de progression + un journal repliable, sans que ces lignes polluent
+# le fichier journal humain. Schéma versionné par la clé de tête "bobine":1
+# (le consommateur filtre les lignes qui matchent ^\{"bobine":). Silencieux hors
+# --progress=json. Réf. docs/cahier-des-charges-installeur.md §10.
+# Astuce SSH : allouer un PTY pour un flush ligne à ligne côté assistant.
+_json_escape() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '%s' "$s"; }
+_now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+_pct_start() { echo $(( (STEP_CUR - 1) * 100 / STEP_TOTAL )); }
+_pct_done()  { echo $(( STEP_CUR * 100 / STEP_TOTAL )); }
+
+emit_event() {
+    $PROGRESS_JSON || return 0
+    printf '{"bobine":1,"ts":"%s",%s}\n' "$(_now_iso)" "$1" >&3
+}
+
+# Émet l'évènement d'une étape. $1=status (start|ok|skip|error), $2=pct,
+# $3=détail optionnel (raison d'un skip, code d'erreur…).
+emit_step() {
+    $PROGRESS_JSON || return 0
+    local extra=""
+    [[ -n "${3:-}" ]] && extra=",\"detail\":\"$(_json_escape "$3")\""
+    emit_event "\"event\":\"step\",\"status\":\"$1\",\"step\":${STEP_CUR},\"total\":${STEP_TOTAL},\"pct\":$2,\"slug\":\"${CURRENT_STEP_SLUG}\",\"title\":\"$(_json_escape "$CURRENT_STEP_TITLE")\"${extra}"
+}
+
+# Clôt l'étape courante une seule fois (émet ok/skip). Permet à step() de clore
+# automatiquement une étape qui n'a pas appelé step_done (ex. « Script de
+# contrôle CLI »), tout en évitant un double évènement quand step_done/step_skip
+# l'ont déjà close.
+_close_step() {
+    $STEP_OPEN || return 0
+    STEP_OPEN=false
+    emit_step "$1" "$(_pct_done)" "${2:-}"
+}
 
 step() {
+    _close_step ok
     STEP_CUR=$((STEP_CUR + 1))
     STEP_START_TS=$SECONDS
+    CURRENT_STEP_SLUG="$1"; shift
     CURRENT_STEP_TITLE="$*"
+    STEP_OPEN=true
     printf '\n%s┃%s %s[%d/%d]%s %s%s%s\n' "$CYAN" "$RESET" "$DIM" "$STEP_CUR" "$STEP_TOTAL" "$RESET" "$BOLD" "$*" "$RESET"
+    emit_step start "$(_pct_start)"
 }
-step_done() { printf '  %s (%ss)\n' "$ICON_OK" "$((SECONDS - STEP_START_TS))"; }
-step_skip() { printf '  %s ignoré — %s\n' "$ICON_SKIP" "$*"; }
+step_done() {
+    printf '  %s (%ss)\n' "$ICON_OK" "$((SECONDS - STEP_START_TS))"
+    _close_step ok
+}
+step_skip() {
+    printf '  %s ignoré — %s\n' "$ICON_SKIP" "$*"
+    _close_step skip "$*"
+}
 
 on_error() {
     local rc=$?
     echo
     err "Échec à l'étape [${STEP_CUR}/${STEP_TOTAL}] ${CURRENT_STEP_TITLE} (code ${rc})."
     [[ -n "${LOG_FILE:-}" ]] && err "Journal complet : ${LOG_FILE}"
+    STEP_OPEN=false
+    emit_step error "$(_pct_start)" "code ${rc}"
+    emit_event "\"event\":\"run_end\",\"status\":\"error\",\"rc\":${rc},\"step\":${STEP_CUR},\"total\":${STEP_TOTAL}"
     exit "$rc"
 }
 trap on_error ERR
@@ -289,6 +360,10 @@ UNITS=(bobine-backend bobine-kiosk bobine-audio-guard bobine-redirect bobine-wat
 LOG_DIR="/var/log/bobine"
 mkdir -p "${LOG_DIR}" 2>/dev/null || LOG_DIR="/tmp"
 LOG_FILE="${LOG_DIR}/install-$(date +%Y%m%d-%H%M%S).log"
+# fd 3 = canal des évènements JSON (--progress=json) : on garde le stdout
+# d'origine AVANT de dérouter le stdout "humain" vers tee. Les évènements
+# atteignent ainsi l'assistant (même canal SSH) sans être écrits au journal.
+exec 3>&1
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
 # ---- Dispatch : désinstallation ----
@@ -451,8 +526,11 @@ if [[ -n "${AVAIL_KB:-}" ]] && (( AVAIL_KB < 2 * 1024 * 1024 )); then
     warn "Moins de 2 Go disponibles sur $(df --output=target "${REPO_DIR}" | tail -1 | tr -d ' ') — l'import de vidéos réclame nettement plus d'espace."
 fi
 
+# Début de la séquence pilotable : métadonnées d'exécution pour l'assistant.
+emit_event "\"event\":\"run_begin\",\"version\":\"${SCRIPT_VERSION}\",\"total\":${STEP_TOTAL},\"user\":\"$(_json_escape "${TARGET_USER}")\",\"repo\":\"$(_json_escape "${REPO_DIR}")\",\"log\":\"$(_json_escape "${LOG_FILE}")\",\"mode\":\"$($NO_KIOSK && echo server || echo kiosk)\",\"dry_run\":${DRY_RUN}"
+
 # ---------------------------------------------------------------------------
-step "Paquets système (apt)"
+step packages "Paquets système (apt)"
 # ---------------------------------------------------------------------------
 if $SKIP_PACKAGES; then
     step_skip "--skip-packages"
@@ -555,7 +633,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "Accès GPU (groupes render/video) & Xwrapper"
+step gpu-access "Accès GPU (groupes render/video) & Xwrapper"
 # ---------------------------------------------------------------------------
 if $NO_KIOSK; then
     step_skip "--no-kiosk"
@@ -584,7 +662,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "Environnement Python & dépendances backend"
+step python-env "Environnement Python & dépendances backend"
 # ---------------------------------------------------------------------------
 if [[ ! -d "${VENV_DIR}" ]]; then
     run_user python3 -m venv "${VENV_DIR}"
@@ -598,7 +676,7 @@ run_user "${VENV_DIR}/bin/pip" install -r "${BACKEND_DIR}/requirements.txt" ${PI
 step_done
 
 # ---------------------------------------------------------------------------
-step "Build du frontend Next.js"
+step frontend-build "Build du frontend Next.js"
 # ---------------------------------------------------------------------------
 if $SKIP_BUILD; then
     step_skip "--skip-build"
@@ -617,7 +695,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "Configuration de production"
+step config "Configuration de production"
 # ---------------------------------------------------------------------------
 log "Écriture de ${CONFIG_FILE}"
 run mkdir -p "${CONFIG_DIR}"
@@ -684,7 +762,7 @@ fi
 step_done
 
 # ---------------------------------------------------------------------------
-step "Script de contrôle CLI 'bobine'"
+step cli-tool "Script de contrôle CLI 'bobine'"
 # ---------------------------------------------------------------------------
 write_file /usr/local/bin/bobine <<'EOF'
 #!/usr/bin/env bash
@@ -707,7 +785,7 @@ run chmod +x /usr/local/bin/bobine
 ok "commande 'bobine' installée"
 
 # ---------------------------------------------------------------------------
-step "Désinstalleur détaché (bouton « Désinstaller » de l'UI)"
+step uninstaller "Désinstalleur détaché (bouton « Désinstaller » de l'UI)"
 # ---------------------------------------------------------------------------
 # Enveloppe lancée en root (règle sudoers dédiée ci-dessous) par le backend
 # quand l'utilisateur confirme la désinstallation depuis Paramètres. systemd-run
@@ -725,7 +803,7 @@ ok "désinstalleur '/usr/local/sbin/bobine-uninstall' installé"
 step_done
 
 # ---------------------------------------------------------------------------
-step "Service systemd — backend FastAPI"
+step backend-service "Service systemd — backend FastAPI"
 # ---------------------------------------------------------------------------
 write_file /etc/systemd/system/bobine-backend.service <<EOF
 [Unit]
@@ -751,7 +829,7 @@ ok "bobine-backend.service écrit"
 step_done
 
 # ---------------------------------------------------------------------------
-step "Kiosk Chromium (écran cinéma câblé)"
+step kiosk "Kiosk Chromium (écran cinéma câblé)"
 # ---------------------------------------------------------------------------
 if $NO_KIOSK; then
     step_skip "--no-kiosk"
@@ -927,7 +1005,7 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-step "Audio (auto-port, anti-sifflement, garde-fou hors session)"
+step audio "Audio (auto-port, anti-sifflement, garde-fou hors session)"
 # ---------------------------------------------------------------------------
 if $NO_KIOSK; then
     step_skip "--no-kiosk"
@@ -1029,7 +1107,7 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-step "Autorisation sudo restreinte (bouton de réinitialisation)"
+step sudoers "Autorisation sudo restreinte (bouton de réinitialisation)"
 # ---------------------------------------------------------------------------
 log "Autorisation sudo restreinte pour le redémarrage des services depuis l'UI"
 if $NO_KIOSK; then
@@ -1060,7 +1138,7 @@ fi
 step_done
 
 # ---------------------------------------------------------------------------
-step "Synchronisation NTP"
+step ntp "Synchronisation NTP"
 # ---------------------------------------------------------------------------
 # Défense en profondeur derrière le correctif applicatif (/api/time + offset
 # côté kiosk) : sans NTP, l'horloge RTC du Wyse peut dériver indépendamment
@@ -1074,7 +1152,7 @@ fi
 step_done
 
 # ---------------------------------------------------------------------------
-step "URL locale (mDNS) & redirection du port 80"
+step mdns-redirect "URL locale (mDNS) & redirection du port 80"
 # ---------------------------------------------------------------------------
 # - avahi (mDNS) publie "bobine.local" sur le LAN sans toucher au
 #   hostname de la machine ;
@@ -1147,7 +1225,7 @@ ok "redirection du port 80 configurée"
 step_done
 
 # ---------------------------------------------------------------------------
-step "Chien de garde de santé (watchdog)"
+step watchdog "Chien de garde de santé (watchdog)"
 # ---------------------------------------------------------------------------
 # Redémarrage AUTOMATIQUE d'un composant mort en consommant /api/health (Redis,
 # base SQLite, kiosque Chromium). Complète `Restart=always` de systemd, qui ne
@@ -1183,7 +1261,7 @@ ok "chien de garde santé (watchdog) écrit"
 step_done
 
 # ---------------------------------------------------------------------------
-step "Activation des services & vérification de santé"
+step activation "Activation des services & vérification de santé"
 # ---------------------------------------------------------------------------
 run systemctl daemon-reload
 if ! $NO_KIOSK; then
@@ -1236,6 +1314,10 @@ box_line "  Contrôle   bobine {start|stop|restart|status|logs}"
 box_line "  Diagnostic sudo ./${SCRIPT_NAME} --check"
 box_bottom
 echo
+
+# Fin de la séquence pilotable : l'assistant peut fermer sa barre à 100 % et
+# afficher l'écran final (URL/QR). healthy reflète le contrôle /api/health.
+emit_event "\"event\":\"run_end\",\"status\":\"ok\",\"pct\":100,\"total\":${STEP_TOTAL},\"healthy\":${HEALTHY:-false},\"url\":\"http://bobine.local\",\"port\":${SERVICE_PORT},\"dry_run\":${DRY_RUN}"
 
 if ! $DRY_RUN; then
     systemctl --no-pager --lines=0 status bobine-backend.service $($NO_KIOSK || echo bobine-kiosk.service) 2>/dev/null || true
