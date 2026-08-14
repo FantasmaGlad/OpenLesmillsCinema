@@ -269,14 +269,34 @@ async def autostart_default_radio_playlist() -> None:
     d'ambiance par défaut. À appeler une fois au démarrage du service, APRÈS
     la reprise d'état Redis (sync_from_redis) — si un autre worker du même
     lancement a déjà une lecture en cours, l'état repris n'est plus "idle" et
-    cet appel ne fait rien (pas de double lancement)."""
+    cet appel ne fait rien (pas de double lancement).
+
+    CORRECTIF (réf. « musiques qui switchent/se chevauchent en permanence ») :
+    contrairement à `fire_schedule`/`fire_schedule_end` (protégés par
+    `_acquire_fire_lock`), cette fonction est appelée directement par CHAQUE
+    worker uvicorn à SON PROPRE démarrage (main.py, pas de callback
+    planning) — sans verrou, les 4 workers exécutaient CHACUN
+    `_launch_radio_shuffle_all` (shuffle=True) en parallèle, calculant CHACUN
+    son propre tirage aléatoire : 4 ordres de lecture divergents en mémoire,
+    un par worker. Un client qui retombe sur un worker différent (resync
+    périodique `GET /api/radio/state`, ou simplement une requête de streaming
+    routée vers un autre worker) voyait alors une piste totalement
+    différente en cours — d'où des changements de piste qui semblaient
+    aléatoires/incessants. Même verrou Redis SET NX PX que le planning : un
+    seul worker agit, les autres reçoivent son état via la diffusion Redis
+    (`apply_remote_state`) — pourvu que `start_redis_listener()` tourne déjà
+    sur CE worker avant cet appel (réf. main.py)."""
     from app.config import settings as runtime_settings
     from app.radio_manager import get_radio_manager
+    from app.utils.tick_lock import acquire_tick_lock
 
     if not runtime_settings.radio_autostart_on_boot:
         return
     manager = get_radio_manager()
     if manager.state["state"] != "idle":
+        return
+    if not await acquire_tick_lock("radio:autostart_lock", ttl_ms=10_000):
+        logger.info("Auto-démarrage radio déjà pris en charge par un autre worker, ignoré ici")
         return
     db = SessionLocal()
     try:

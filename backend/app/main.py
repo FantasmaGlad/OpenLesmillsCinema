@@ -98,10 +98,16 @@ async def lifespan(app: FastAPI):
     # principe de reprise d'état que les canaux câblé/réseau ci-dessus, sur
     # son propre gestionnaire indépendant.
     await get_radio_manager().sync_from_redis()
+    # Abonnement au canal de diffusion inter-workers AVANT l'auto-démarrage
+    # radio ci-dessous (réf. correctif "musiques qui switchent en
+    # permanence") : autostart_default_radio_playlist() ne laisse qu'UN SEUL
+    # worker agir (verrou Redis) ; les autres doivent déjà écouter pour
+    # recevoir sa diffusion et converger vers le même état, plutôt que de
+    # rester chacun sur leur état local par défaut (idle).
+    await ws_manager.start_redis_listener()
     # 24/7 (réf. lot L7, D10) : après reprise d'état — un worker qui rejoint
     # un lancement de service déjà en cours ne doit rien auto-démarrer.
     await autostart_default_radio_playlist()
-    await ws_manager.start_redis_listener()
     # Écouteur de synchronisation du planning (réf. correctif "la modification
     # d'un planning ne se propage qu'au worker qui a reçu la requête") : même
     # principe que les deux écouteurs ci-dessus, pour que les 4 workers
