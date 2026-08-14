@@ -1,303 +1,169 @@
 # Bobine
 
-Diffusion, planification et pilotage de vidéos de cours en salle, sur mini PC dédié. Serveur multi-worker FastAPI + Redis + SQLite, kiosque Chromium X11, interface d'administration et télécommande mobile Next.js.
+**Self-hosted, offline-first digital signage and scheduled video player for group-fitness studios and gyms.**
 
-Ce document est écrit pour quiconque souhaite **comprendre, exploiter, modifier ou déployer** le système Bobine : il décrit l'architecture réellement en place (pas une intention), le contrat réseau, le modèle de données inter-workers, ainsi que la configuration d'exploitation sur mini PC dédié.
+Bobine turns a low-cost dedicated mini PC into a complete in-club video system: it schedules and plays pre-recorded group-fitness class videos on your screens, lets members browse and start a class on demand from a kiosk, drives a wired and a networked display independently, runs a coach audio mode with animated backgrounds, and streams 24/7 background music. Everything runs locally on your own hardware. No cloud, no subscription, no internet required after setup.
 
----
+[Français](README.fr.md) · [Technical documentation](docs/ARCHITECTURE.md)
 
-## Sommaire
+![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue)
+![Backend: FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688)
+![Frontend: Next.js](https://img.shields.io/badge/Frontend-Next.js-000000)
+![Platform: Debian 13](https://img.shields.io/badge/Platform-Debian%2013-A81D33)
+![Self-hosted](https://img.shields.io/badge/Self--hosted-Local--first-4c1)
 
-1. [Stack et démarrage](#1-stack-et-démarrage)
-2. [Architecture générale (Multi-worker & Bus Redis)](#2-architecture-générale)
-3. [Modèle de données & Persistance SQLite](#3-modèle-de-données--persistance-sqlite)
-4. [Canaux de diffusion & Gestionnaire de lecture](#4-canaux-de-diffusion--gestionnaire-de-lecture)
-5. [Module Radio](#5-module-radio)
-6. [Mode Audio Coach & Fonds animés](#6-mode-audio-coach--fonds-animés)
-7. [Script d'installation & Services systemd](#7-script-dinstallation--services-systemd)
-8. [Référence API HTTP & WebSockets](#8-référence-api-http--websockets)
-9. [Exploitation & Découverte Réseau (Wyse)](#9-exploitation--découverte-réseau-wyse)
-10. [Licence](#10-licence)
+**Keywords:** self-hosted digital signage, group fitness, gym class scheduling, on-demand fitness video player, exercise class kiosk, boutique studio, indoor cycling, thin client, mini PC, offline, local-first, FastAPI, Next.js, Debian.
 
 ---
 
-## 1. Stack et démarrage
+## Why Bobine
 
-### Stack technique
+Group-fitness rooms increasingly run pre-recorded, instructor-led video classes ("virtual classes") on a big screen. Off-the-shelf solutions are cloud-locked, subscription-based, and stop working when the internet drops. Bobine is the opposite:
 
-- **Backend** : Python 3.11+, [FastAPI](https://fastapi.tiangolo.com/) + `uvicorn` (4 workers), [SQLAlchemy](https://www.sqlalchemy.org/), SQLite (`data/database.db`), Redis (bus d'état Pub/Sub, verrous distribués), `APScheduler` (planification), `watchdog` (surveillance des dossiers d'import), `ffmpeg` / VAAPI (décodage matériel Intel), Web Audio API (crossfade radio, côté navigateur).
-- **Frontend** : [Next.js](https://nextjs.org/) 16 (App Router, export statique servi par le backend en production), React 19, TypeScript, CSS Vanilla (global + design tokens, **13 thèmes de couleurs** commutables à chaud via `:root[data-theme=…]`), PWA (`manifest.json`), WebSockets, glisser-déposer natif (HTML5), Web Audio API.
-- **Exploitation & Kiosque** : Debian 13 (Trixie), Chromium en mode kiosque (X11 / `xinit`), `systemd` (services backend, kiosque, garde audio), `avahi-daemon` (découverte mDNS).
+- **You own it.** Your videos, your hardware, your schedule. No monthly fee, no vendor lock-in, no account.
+- **It works offline.** Once installed, the club needs no internet connection to run classes.
+- **It runs on cheap hardware.** A second-hand thin client or mini PC (Dell Wyse 5070 class) is enough.
+- **It is unattended.** Auto-starts on power-up, recovers from power loss, and restarts a failed component on its own.
 
-### Développements locaux
+Typical users: boutique studios, gyms, hotel and corporate fitness rooms, physiotherapy and rehab spaces, dance and cycling studios — anyone who plays scheduled or on-demand fitness videos on a screen.
 
-**Préréquis** : Node.js ≥ 20, Python ≥ 3.11, Redis local actif.
+Bobine is program-agnostic: class categories are free-form, so it fits any catalogue of group-fitness, cycling, strength, mobility or wellbeing classes.
+
+---
+
+## Features
+
+- **Video scheduling** — build a weekly timetable; classes start automatically at the right time on the right screen.
+- **On-demand cinema kiosk** — a member-facing full-screen browser to pick and start a class themselves, with a launch animation and a "up next" countdown.
+- **Two independent display outputs** — drive a wired screen (HDMI) and a networked screen separately, each with its own content.
+- **Mobile remote** — control playback (play, pause, seek, next) from any phone on the local network.
+- **Coach audio mode** — play audio-only classes over the room speakers with an animated or still visual background on screen.
+- **Built-in radio** — a Spotify-style 24/7 background-music player with crossfade, shuffle, repeat, and scheduled spoken reminders ("re-rack your weights", etc.).
+- **Simple library management** — drag-and-drop import, bulk upload, free-form categories, grouped selection, per-file import progress, automatic thumbnails.
+- **Local-first and resilient** — multi-worker backend, shared state, automatic recovery after a reboot or power cut, and a health watchdog that restarts a dead component.
+- **Web admin + zero client install** — administer everything from a browser; member screens and remotes are just web pages.
+
+---
+
+## How it works
+
+Bobine is a single mini PC on your local network running:
+
+- a **FastAPI** backend (multi-worker) with **Redis** as a shared state bus and **SQLite** for storage;
+- a **Chromium** kiosk in full screen (X11) for the wired screen;
+- a **Next.js** admin panel, member kiosk, and mobile remote, all served as static pages from the same machine.
+
+Other screens (networked display, member remotes, the admin PC) are ordinary web browsers pointing at the mini PC. Media never leaves your network.
+
+For the full architecture, data model, network contract and API reference, see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+---
+
+## Hardware requirements
+
+- An **x86-64 mini PC or thin client** (reference target: Dell Wyse 5070, Intel Gemini Lake). Any small Debian-capable PC with an Intel iGPU works; hardware video decoding is used when available.
+- **4 GB RAM** minimum, a few GB of disk for the app plus room for your video library.
+- **One or two screens** (HDMI for the wired output; the networked screen is any device with a browser).
+- A **local network** (wired recommended for the video screens).
+
+Internet is only needed once, to install the operating system and the software.
+
+---
+
+## Quick start
+
+### 1. Install Debian 13 from a USB key (fast path)
+
+Bobine targets **Debian 13 "Trixie"**, minimal install, no desktop environment (Bobine brings its own kiosk display stack).
+
+1. **Download** the Debian 13 *netinst* image (~700 MB) from the official site: <https://www.debian.org/download>.
+2. **Write it to a USB key** (8 GB+). The key is erased.
+   - Linux: `sudo dd if=debian-13-*-amd64-netinst.iso of=/dev/sdX bs=4M status=progress oflag=sync` (replace `/dev/sdX` with your USB device from `lsblk` — double-check, this overwrites the target).
+   - Windows/macOS: use [balenaEtcher](https://etcher.balena.io/) or Rufus, select the ISO and the USB key, flash.
+3. **Boot the mini PC from the USB key**: power on and press the boot-menu key (often `F12`, `F7`, `F10` or `Esc` on Dell/thin clients), pick the USB device.
+4. **Run the Debian installer** (graphical or text):
+   - Set hostname, a normal user account and password (remember them — you connect over SSH with this user).
+   - At *Software selection*, **deselect every desktop environment**; keep only **SSH server** and **standard system utilities**.
+   - Finish and reboot, removing the USB key.
+
+You now have a minimal Debian 13 machine reachable on your network.
+
+### 2. Install Bobine
+
+On the mini PC (directly or over SSH), as your normal user (not root):
 
 ```bash
-# 1. Backend (FastAPI + Redis) — port 8001 en dev (voir note ci-dessous)
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-redis-server &          # requis : bus d'état partagé
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
-
-# 2. Frontend (Next.js)
-cd frontend
-npm install
-npm run dev             # accessible sur http://localhost:3000
-```
-
-> **Quirk de dev (port)** : servi par `next dev` sur `:3000`, le frontend route ses appels API/WebSocket vers `localhost:8001` (cf. `getApiUrl`/`getWsUrl`) — d'où le backend sur **8001** en développement. Alternative sans ce décalage, pratique pour vérifier le rendu réel : `cd frontend && npm run build` (export statique dans `frontend/out`) puis lancer le backend sur `:8000` — il sert lui-même `frontend/out` à `/` (même origine `/api`), il suffit alors de naviguer sur `http://localhost:8000/<route>/`.
-
-**Validation rapide avant commit** :
-
-```bash
-# Vérification de syntaxe Python (AST)
-backend/.venv/bin/python -c "import ast; ast.parse(open('backend/app/main.py').read())"
-
-# Vérification du typage Frontend (TypeScript)
-cd frontend && npx tsc --noEmit
-```
-
-### Configuration (`config.toml`)
-
-La configuration est chargée selon l'ordre de priorité suivant :
-1. Variables d'environnement préfixées `BOBINE_` (priorité maximale).
-2. `/etc/bobine/config.toml` (production, écrit par `install.sh`).
-3. `config.toml` à la racine du dépôt (développement).
-
-| Clé | Défaut | Rôle |
-|---|---|---|
-| `database.database_url` | `sqlite:///data/database.db` | URL de connexion SQLite |
-| `redis.redis_url` | `redis://localhost:6379/0` | URL du bus d'état Redis |
-| `media.media_dir` | `data/videos` | Stockage des vidéos importées |
-| `media.watch_dir` | `data/watched` | Dossier surveillé pour import automatique |
-| `server.host` / `port` | `0.0.0.0:8000` | Écoute HTTP du backend |
-| `playback.wait_time_between_courses` | `10` | Délai d'inter-cours (s) |
-| `playback.volume_default` | `100` | Volume par défaut (0-100) |
-
-> **Fichiers temporaires d'upload** : le backend force `tempfile.tempdir` sur `data/tmp` (à côté des médias) au démarrage, au lieu de `/tmp`. Sur le Wyse, `/tmp` est un tmpfs en RAM (~3,8 Go) qu'un gros import vidéo/audio saturait (`OSError: No space left on device`, remonté côté client en « There was an error parsing the body ») alors que le disque média a des dizaines de Go libres.
-
----
-
-## 2. Architecture générale
-
-```
-┌─────────────┐      HTTP / WebSockets      ┌─────────────────────────────────┐
-│  Frontend   │ ───────────────────────────►│        Backend FastAPI          │
-│  Next.js    │                             │    (uvicorn, 4 workers)         │
-│ (Kiosque /  │◀─────────────────────────── │  app/routers/* → playback_mgr   │
-│  Admin /    │                             └─────────────────────────────────┘
-│ Mobile Remote)│                                    │               │
-└─────────────┘                                    │               │
-                                                   ▼               ▼
-                                          ┌──────────────┐ ┌──────────────┐
-                                          │    SQLite    │ │    Redis     │
-                                          │ (database.db)│ │ (Pub/Sub &   │
-                                          └──────────────┘ │  State Bus)  │
-                                                           └──────────────┘
-```
-
-Le backend tourne en plusieurs workers `uvicorn` sous le même processus maître. Redis sert de **bus d'état partagé** (position de lecture, décompte inter-cours, verrous de tick `tick_lock.py`, synchronisation de planning) et de canal de diffusion Pub/Sub pour les WebSockets. Un client web reste parfaitement synchronisé quel que soit le worker traitant la requête HTTP.
-
-### Arborescence backend (`backend/app/`)
-
-- `main.py` : Entrée de l'application FastAPI, initialisation des routes, des événements de démarrage (`boot_state.py`) et du serveur d'assets statiques.
-- `playback_manager.py` : Moteur de lecture multi-canal câblé/réseau (gestion de l'état `PLAYING`, `PAUSED`, `IDLE`, minutage et reprise).
-- `radio_manager.py` : Moteur de lecture du canal Radio (§5) — état INDÉPENDANT de `playback_manager.py` (playlist de morceaux, pas vidéo/cours), même connexion WebSocket.
-- `scheduler_manager.py` : Gestionnaire `APScheduler` de la programmation horaire (récurrences, détections de conflits, décalages, fenêtres radio).
-- `models.py` : Déclarations SQLAlchemy ORM.
-- `config.py` : Gestionnaire de configuration dynamique.
-- `routers/` : Endpoints HTTP groupés par domaine (`videos`, `backgrounds`, `playlists`, `audio`, `audio_playlists`, `schedule`, `playback`, `settings`, `logs`, `import_jobs`, `radio`, `radio_playlists`, `radio_announcements`).
-
----
-
-## 3. Modèle de données & Persistance SQLite
-
-Le schéma de données est géré par **SQLAlchemy**. Il n'y a **pas d'Alembic actif** dans ce projet (dossier `alembic/versions/` vide) : les tables sont créées par `Base.metadata.create_all()` au démarrage, et l'ajout de colonnes sur des tables existantes passe par des micro-migrations idempotentes dans `database.py::_migrate_add_missing_columns`. Stockage dans un fichier SQLite unique (`data/database.db`).
-
-### Entités principales
-
-- `videos` / `backgrounds` : Métadonnées des médias (durée, résolution, codec, vignettes générées dans `data/thumbnails`).
-- `playlists` & `playlist_items` : Playlists de cours vidéo ordonnées.
-- `audio_courses` & `audio_tracks` : Cours audio importés et leurs pistes associées.
-- `audio_playlists` & `audio_playlist_items` : Éditions mixées audio coach avec attribution de fond visuel par piste.
-- `schedules` & `schedule_overrides` : Programmations récurrentes ou ponctuelles, avec gestion des exceptions d'occurrences (annulation, remplacement).
-- `playback_state` : État de lecture persisté par canal (*Câblé* et *Réseau*), incluant la sauvegarde des actions interrompues pour la reprise automatique.
-- `settings` : Clés/valeurs des paramètres modifiables à chaud depuis l'interface admin.
-- `activity_log` : Journal des événements fonctionnels et techniques du système.
-- `radio_tracks`, `radio_tags`, `radio_playlists` & `radio_playlist_items` : Bibliothèque musicale et playlists du module Radio (§5) — sous-système indépendant des cours vidéo/audio coach.
-- `radio_announcements` & `radio_announcement_rules` : Rappels de bienséance (annonces) et leurs règles de déclenchement.
-
----
-
-## 4. Canaux de diffusion & Gestionnaire de lecture
-
-Le système pilote deux canaux de diffusion vidéo **strictement indépendants**, plus un 3ᵉ canal musical (§5) :
-
-1. **Canal Câblé (`channel=cable`)** : Canal d'affichage principal relié à la sortie vidéo physique du mini PC (écran salle / kiosque).
-2. **Canal Réseau (`channel=network`)** : Canal secondaire destiné à la diffusion réseau ou aux écrans auxiliaires.
-3. **Canal Radio (`channel=radio`)** : 3ᵉ canal, totalement indépendant des deux premiers (aucune interaction) — diffusion musicale continue sur un poste dédié. Géré par un gestionnaire d'état séparé (`radio_manager.py`), pas le `playback_manager` ci-dessous.
-
-Chaque écran affiche `/kiosk` ou `/cinema` selon la sortie choisie par l'admin (`/api/settings/display-output`, ex. câble → `cinema`, réseau → `kiosk`). L'écran câblé (`127.0.0.1`, détecté par `isWiredDisplay()`) suit toujours sa sortie stockée. **Bibliothèque vide** : `/cinema` affiche un écran d'attente plein écran (grand logo + heure + « Aucun cours disponible ») au lieu d'un écran noir ; `/kiosk` a son propre écran d'attente (horloge + prochain cours). Les **catégories de cours** sont des libellés **libres** (plus de RPM/Sprint/The Trip figés) : saisie avec suggestions des catégories déjà utilisées, filtre et regroupement dynamiques.
-
-### Reprise après interruption (Resilience Rule)
-
-Lorsqu'une programmation automatique (`scheduler`) doit démarrer alors qu'une lecture manuelle est en cours :
-1. Le `playback_manager` interrompt la lecture manuelle et sauvegarde la position exacte et l'identifiant du média dans `playback_state`.
-2. Le cours programmé s'exécute.
-3. À la fin de la programmation, l'interface propose automatiquement la **reprise à la seconde près** du cours interrompu.
-
----
-
-## 5. Module Radio
-
-Sous-système musical « type Spotify » **totalement indépendant** des cours vidéo/audio coach (canal `radio` dédié, tables `radio_*`, gestionnaire d'état `radio_manager.py`) — bibliothèque, playlists, lecture continue, crossfade et rappels sonores. Cahier des charges complet, décisions et découpage en lots : [`docs/cahier-des-charges-radio.md`](docs/cahier-des-charges-radio.md).
-
-- **Surfaces** : `/radio` (écran du poste dédié — affichage + contrôles, ouvert à la main dans un navigateur, pas de service kiosk systemd), onglet admin « Radio » (télécommande à distance sur `/radio-remote`), « Piste Audio Radio » (bibliothèque sur `/radio-library`), « Rappels » (annonces sur `/radio-announcements`), et un 3ᵉ onglet « Radio » sur la page Planning (`/schedule/?channel=radio`). Hors diffusion (écran d'attente + overlay « Démarrer la radio »), le poste affiche un **grand logo plein écran** (fond opaque du thème) ; déverrouiller le poste **ne lance aucune musique** tant qu'aucune radio n'est réellement active (état `idle`), pour ne pas désynchroniser l'interface admin.
-- **Bibliothèque** : import tous formats audio (transcodage automatique de ce que le navigateur ne lit pas), pochettes extraites (ID3) ou manuelles, navigation par artiste/album/tags. L'écran admin « Piste Audio Radio » (`/radio-library`) est une **vue d'ensemble** : barre latérale de filtres (playlists / tags / genres / artistes), grille à sélection multiple avec actions groupées (taguer, ajouter à une playlist), tags éditables en chips, éditeur de playlist en glisser-déposer.
-- **Lecture** : continue, file d'attente, lecture aléatoire, répétition (piste/playlist), **crossfade** (Web Audio API — deux `<audio>` routés dans un graphe `MediaElementAudioSourceNode → GainNode → destination`, fondu démarré côté client en avance sur la confirmation serveur).
-- **Rappels** : annonces de bienséance avec description, règles de déclenchement (toutes les N musiques / toutes les X minutes / à heures fixes / manuel), insertion en attente de fin de piste ou par fondu immédiat (« duck » — réutilise le même graphe Web Audio que le crossfade). Chaque rappel est **normalisé en loudness à l'import** (`ffmpeg loudnorm` EBU R128, 2 passes, cible -10 LUFS) pour s'entendre au moins aussi fort que la musique. Écran d'admin dédié (`/radio-announcements`) : import, activation, règles, déclenchement manuel.
-- **24/7 & Planning** : une playlist marquée par défaut tourne en boucle en permanence ; auto-démarrage au boot (`radio_autostart_on_boot`) ; le Planning peut y superposer des fenêtres horaires récurrentes (option 24/7) qui reviennent automatiquement à l'ambiance par défaut en fin de fenêtre.
-- **Config** (`radio_dir`, `radio_covers_dir`, `radio_announcements_dir`, `radio_watch_dir`, `radio_volume_default`, `radio_crossfade_seconds`, `radio_announcement_duck_level`, `radio_announcement_fade_ms`, `radio_autostart_on_boot`) : voir `config.py` — dossiers unifiés sous `${REPO_DIR}/data` par `install.sh` comme le reste des médias.
-
----
-
-## 6. Mode Audio Coach & Fonds animés
-
-Le mode **Audio Coach** permet de diffuser des cours audio (pistes vocales / musique) sur l'équipement sonore de la salle tout en affichant un fond visuel dynamique sur l'écran.
-
-- **Importation** : Support des fichiers MP3 individuellement ou par paquets ZIP.
-- **Fonds animés** : Boucles vidéo stockées dans `data/backgrounds` (arbre média unifié sous `${REPO_DIR}/data`), jouées en boucle infinie sans coupure.
-- **Minuteur d'enchaînement (`audio_chain_timer_seconds`)** : Délai de transition configurable entre deux pistes audio (modifiable depuis `/api/settings`).
-- **Lancement** : une playlist audio coach se lance depuis la page « Cours Audio » (`/audio`, actif uniquement quand le câblé est **déjà** en mode coach — sinon on passe d'abord par « Passer en mode coach » / `/coach`) ou directement depuis l'écran mobile `/coach`. Le raccourci autrefois présent sur le tableau de bord câblé a été déplacé ici.
-
----
-
-## 7. Script d'installation & Services systemd
-
-L'installation de production s'effectue via le script shell idempotent `install.sh` sur Debian 13 (Trixie).
-
-```bash
-# Installation complète sur la machine cible
+git clone https://github.com/FantasmaGlad/Bobine.git
+cd Bobine
 sudo ./install.sh
 ```
 
-### Options d'installation (`sudo ./install.sh --help`)
+`install.sh` is idempotent and self-contained. It installs system packages, Redis, Node.js and the Python environment, builds the web interface, writes the configuration, registers the systemd services (backend, kiosk, audio guard, health watchdog), publishes the `bobine.local` name on the network, and starts everything. Re-run it after an update to rebuild and restart cleanly.
 
-| Option | Description |
-|---|---|
-| `--no-kiosk` | Installation du backend seul (sans Chromium X11 / audio) |
-| `--dry-run` | Prévisualisation des actions sans modification |
-| `--check` | Diagnostic de l'installation existante |
-| `--skip-packages` | Mise à jour du projet (après déploiement du code, §9) sans réinstaller les paquets `apt` |
-| `--skip-build` | Ne reconstruit pas le frontend Next.js |
-| `--uninstall [--purge] [--purge-data]` | Désinstallation progressive du système |
+No internet at the club? You can copy the repository from another machine over SSH (rsync) instead of cloning it — see the *Operation & deployment* section of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-### Services Systemd créés
+### 3. Open the interface
 
-- `bobine-backend.service` : API FastAPI Uvicorn sur le port 8000 (4 workers).
-- `bobine-kiosk.service` : Mode Kiosque Chromium plein écran sur `xinit` (X11).
-- `bobine-audio-guard.service` : Watchdog de surveillance du système et de l'audio (silence hors session kiosque).
-- `bobine-redirect.service` : Redirection nftables du port 80 vers 8000.
+From any device on the same network, open:
 
-Pas de service dédié pour le canal Radio (arbitrage A5, cf. §5) : `/radio` s'ouvre à la main dans un navigateur, sur le même backend.
-
-### Autorisation sudo restreinte & désinstallation depuis l'interface
-
-`install.sh` écrit `/etc/sudoers.d/bobine` autorisant **sans mot de passe, et uniquement**, deux actions déclenchées depuis l'admin :
-
-- le **redémarrage** des services (`systemctl restart`) — bouton « Synchronisation des écrans » (Paramètres → Maintenance) : chaque écran connecté **vide son cache navigateur** puis se recharge (re-télécharge les nouveaux assets), et le backend + le kiosque sont relancés. À utiliser après une mise à jour des médias ou en cas de comportement bloqué ;
-- l'enveloppe de **désinstallation** `/usr/local/sbin/bobine-uninstall` — bouton « Désinstaller » (Paramètres → **Zone de danger**). L'enveloppe détache la remise à zéro via `systemd-run` (pour survivre à l'arrêt du service backend) puis exécute `install.sh --uninstall --purge --purge-data -y` : arrêt/suppression des services + config `/etc` + application + venv + **toutes les données** (les paquets `apt` partagés sont conservés). L'UI exige de recopier la phrase « DÉSINSTALLER » ; hors machine installée (poste de dev), l'endpoint refuse proprement.
-
----
-
-## 8. Référence API HTTP & WebSockets
-
-### Endpoints HTTP (`/api`)
-
-| Domaine | Préfixe | Description |
-|---|---|---|
-| **Vidéos** | `/api/videos` | Import, liste, détail, normalisation, suppression et catégories distinctes (`/videos/programs`) |
-| **Playlists Vidéo** | `/api/playlists` | Gestion des playlists vidéo (CRUD, relecture) |
-| **Fonds Animés** | `/api/backgrounds` | Gestion de la bibliothèque de boucles visuelles |
-| **Audio Coach** | `/api/audio` | Import de cours audio (MP3/ZIP), gestion des pistes |
-| **Playlists Audio** | `/api/audio-playlists` | Playlists mixtes audio coach avec fonds |
-| **Planning** | `/api/schedule` | Programmateurs, occurrences et exceptions |
-| **Lecture** | `/api/playback` | Contrôle de la lecture (play, pause, seek, stop, reprise) |
-| **Paramètres** | `/api/settings` | Configuration dynamique (lecture/thème/langue), sortie vidéo, espace de stockage (`/settings/storage`), synchronisation des écrans (`POST /settings/system/reset` — vidage des caches + rechargement + relance des services) et désinstallation machine (`POST /settings/system/uninstall`, phrase de confirmation requise) |
-| **Imports** | `/api/import-jobs` | Suivi des tâches d'importation en arrière-plan |
-| **Logs** | `/api/logs` | Consultation et téléchargement des journaux système |
-| **Radio — Bibliothèque** | `/api/radio` | Morceaux (CRUD, artistes/albums/tags), playlists radio, état du canal (`/api/radio/state`) |
-| **Radio — Rappels** | `/api/radio/announcements`, `/api/radio/announcement-rules` | Annonces (import + description), règles de déclenchement, déclenchement manuel |
-
-### WebSockets
-
-- `/ws/playback` : Diffusion en temps réel de l'état de lecture par canal — câblé, réseau **et radio** (`channel=radio`, même connexion, vocabulaire de commandes `radio_*` propre au canal musical) — *position*, *durée*, *média courant*, décompte inter-cours.
-
----
-
-## 9. Exploitation & Découverte Réseau (Wyse)
-
-Sur le réseau local, la machine Wyse de production (`pavilion-malefique` / Dell Wyse 5070) reçoit son adresse IP via **DHCP**.
-
-### Protocole de Découverte Réseau (Si l'IP change)
-
-1. **Test sur l'adresse courante ou le nom mDNS** :
-   ```bash
-   curl -s --connect-timeout 2 http://10.0.0.30:8000/api/settings
-   curl -s --connect-timeout 2 http://pavilion-malefique.local:8000/api/settings
-   ```
-2. **Scan Nmap automatique du sous-réseau** (si l'IP n'est pas joignable) :
-   ```bash
-   SUBNET=$(ip route | grep default | awk '{print $3}' | cut -d. -f1-3).0/24
-   nmap -p 8000 --open "$SUBNET" -oG - | grep "8000/open"
-   ```
-
-### Commandes d'Exploitation à Distance (SSH)
-
-```bash
-# Vérifier l'état des services systemd sur la Wyse
-ssh fanta@<WYSE_IP> "systemctl status bobine-backend bobine-kiosk"
+```
+http://bobine.local
 ```
 
-### Déploiement sur la Wyse
+Bobine publishes itself over **mDNS (Zeroconf/Bonjour)** as `bobine.local`, so you do not need to know its IP address. If your network blocks mDNS, use the machine's IP directly (`http://<ip-address>`); the machine's IP is shown at the end of `install.sh`, or find it with `hostname -I` on the mini PC.
 
-⚠️ **`git pull` ne fonctionne PAS sur la Wyse** : son réseau bloque GitHub entièrement (ports 22 **et** 443 vers github.com). Le dépôt `/home/fanta/Bobine` sur la Wyse **n'est pas un clone git** — le déploiement se fait par copie (`rsync`) depuis un poste de dev sur le même réseau local, jamais par `git pull` sur la machine cible elle-même.
-
-```bash
-# 1. Depuis le poste de dev, sur le même LAN que la Wyse — toujours en
-#    --dry-run d'abord, vérifier qu'aucune ligne "deleting" ne touche data/ :
-rsync -a --delete --dry-run \
-  --exclude='.git/' --exclude='data/' --exclude='backend/data/' --exclude='backend/.venv/' \
-  --exclude='frontend/node_modules/' --exclude='frontend/.next/' --exclude='frontend/out/' \
-  --exclude='__pycache__/' --exclude='*.pyc' --exclude='*.db*' --exclude='*.log' \
-  --exclude='backend/.pytest_cache/' --exclude='VideoTest/' \
-  --exclude='.claude/' --exclude='.agents/' --exclude='.gemini/' \
-  --exclude='AGENTS.md' --exclude='CLAUDE.md' \
-  ./ fanta@<WYSE_IP>:/home/fanta/Bobine/
-# (puis sans --dry-run une fois vérifié)
-
-# 2. Sur la Wyse : si le déploiement ajoute/modifie des dossiers média, des
-#    réglages de config.toml ou des services systemd, relancer l'installateur
-#    (idempotent, ne touche jamais data/ hors --uninstall --purge-data) :
-ssh fanta@<WYSE_IP> "cd /home/fanta/Bobine && sudo ./install.sh --skip-packages -y"
-# Pour un changement de CODE SEUL (aucun nouveau dossier/réglage/service),
-# un simple rebuild suffit à la place de l'étape ci-dessus :
-#   ssh fanta@<WYSE_IP> "cd /home/fanta/Bobine/frontend && npm run build"
-
-# 3. install.sh ne redémarre PAS un service déjà actif : redémarrage explicite
-#    pour charger le nouveau code (ces deux commandes sont NOPASSWD) :
-ssh fanta@<WYSE_IP> "sudo -n systemctl restart bobine-backend.service && sudo -n systemctl restart bobine-kiosk.service"
-
-# 4. Vérifier : santé de l'API, services actifs, espace disque de data/ inchangé
-ssh fanta@<WYSE_IP> "curl -s localhost:8000/api/health; systemctl is-active bobine-backend bobine-kiosk; du -sh /home/fanta/Bobine/data"
-```
-
-Les commits restent locaux jusqu'à ce qu'une machine avec accès GitHub (hors LAN de la Wyse) les pousse sur `origin/main` — le déploiement ne dépend jamais de ce push.
+Import a few class videos from the admin panel, build a schedule or a playlist, and the wired screen starts playing.
 
 ---
 
-## 10. Licence
+## Using Bobine
 
-Ce projet est distribué sous licence Open Source **MIT**.
+- **Admin panel** (`http://bobine.local`) — import and organise videos, background loops, audio classes and radio tracks; build playlists and schedules; manage settings, themes and language.
+- **Member cinema** — the wired screen shows a browse menu; members start a class themselves. New imports appear on it automatically.
+- **Networked screen** — a second, independent output; choose what each screen shows in *Settings → Display output*.
+- **Mobile remote** — open `http://bobine.local` on a phone; it adapts to a remote-control layout for staff.
+- **Radio** — open the radio screen on a dedicated device to play background music continuously; controlled from the admin *Radio* tab.
+- **Screen sync** — *Settings → Sync screens* clears every connected screen's cache and reloads it with the latest assets, and restarts the services.
+
+---
+
+## Health and monitoring
+
+Bobine exposes a machine-readable health endpoint:
+
+```
+GET http://bobine.local/api/health
+```
+
+It reports the status of **Redis**, the **SQLite database** and the **Chromium kiosk**, and returns HTTP `200` when healthy or `503` when a critical component is down. An on-device **watchdog** polls it and automatically restarts a failed component (backend, Redis or kiosk), so the club recovers without manual intervention. All services also restart automatically after a power cut.
+
+---
+
+## Uninstall
+
+From the admin panel: *Settings → Danger zone → Uninstall* (a confirmation phrase is required). Or from the command line on the mini PC:
+
+```bash
+sudo ./install.sh --uninstall --purge
+```
+
+Add `--purge-data` to also remove imported media (irreversible). Shared system packages are kept. See `sudo ./install.sh --help` for all options.
+
+---
+
+## Documentation
+
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — technical reference: architecture, data model, network contract, API and WebSocket reference, systemd services, remote operation.
+- **[docs/cahier-des-charges-radio.md](docs/cahier-des-charges-radio.md)** — full specification of the radio subsystem (French).
+
+---
+
+## License
+
+Bobine is free software licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** — see [`LICENSE`](LICENSE). If you run a modified version to provide a network service, you must make your modified source available under the same license.
+
+---
+
+## Status and roadmap
+
+Bobine is in active use in production on dedicated hardware. Planned: a dedicated project website and expanded documentation. Issues and contributions are welcome on the [GitHub repository](https://github.com/FantasmaGlad/Bobine).
