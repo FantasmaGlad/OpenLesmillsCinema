@@ -6,8 +6,14 @@ import { useAppSettings } from "@/lib/AppSettingsContext";
 import { isWiredDisplay, useDisplayOutputRedirect } from "@/lib/useDisplayOutputRedirect";
 import { useHoverSound } from "@/lib/useHoverSound";
 import { useThemeAccentForeground } from "@/lib/useThemeAccentForeground";
+import { useKioskRemote, moveDomFocus, activateDomFocus } from "@/lib/useKioskRemote";
 import Icon from "@/components/Icon";
 import AppLogo from "@/components/AppLogo";
+
+// Boutons de cours focalisables par la télécommande, dans l'ordre de lecture
+// (héros, puis rangées par programme, puis grille complète).
+const CINEMA_GRID_CARDS =
+  ".cinema-grid-layer .cinema-hero-play, .cinema-grid-layer .cinema-card, .cinema-grid-layer .cinema-all-item";
 
 function getApiUrl(path: string) {
   if (typeof window !== "undefined" && window.location.port === "3000") {
@@ -472,6 +478,63 @@ export default function CinemaPage() {
     if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
     controlsTimerRef.current = setTimeout(() => setControlsVisible(false), CONTROLS_HIDE_MS);
   }, []);
+
+  // ------------------------------------------------------------------
+  // Télécommande à dongle USB (réf. demande) : navigation de la vitrine au
+  // clavier (focus natif des cartes) + transport pendant la lecture. Aucun
+  // pilote ni matériel : la télécommande émet des touches clavier/média que
+  // Chromium délivre en `keydown`. Voir useKioskRemote.
+  // ------------------------------------------------------------------
+  const seekBy = (delta: number) => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.currentTime = Math.max(0, Math.min((el.currentTime || 0) + delta, el.duration || 0));
+    wakeControls();
+  };
+  const changeLocalVolume = (delta: number) => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.volume = Math.max(0, Math.min(1, (el.volume ?? 1) + delta));
+    wakeControls();
+  };
+  useKioskRemote(() => {
+    if (phase === "grid") {
+      return {
+        onLeft: () => moveDomFocus(CINEMA_GRID_CARDS, -1),
+        onUp: () => moveDomFocus(CINEMA_GRID_CARDS, -1),
+        onPrev: () => moveDomFocus(CINEMA_GRID_CARDS, -1),
+        onRight: () => moveDomFocus(CINEMA_GRID_CARDS, 1),
+        onDown: () => moveDomFocus(CINEMA_GRID_CARDS, 1),
+        onNext: () => moveDomFocus(CINEMA_GRID_CARDS, 1),
+        onEnter: () => activateDomFocus(CINEMA_GRID_CARDS),
+        onPlayPause: () => activateDomFocus(CINEMA_GRID_CARDS),
+      };
+    }
+    if (phase === "countdown") {
+      return { onBack: handleBackToMenu };
+    }
+    if (phase === "playing") {
+      return {
+        onPlayPause: handlePlayPause,
+        onEnter: handlePlayPause,
+        onBack: handleBackToMenu,
+        onLeft: () => seekBy(-10),
+        onRight: () => seekBy(10),
+        onUp: () => changeLocalVolume(0.1),
+        onDown: () => changeLocalVolume(-0.1),
+        onVolumeUp: () => changeLocalVolume(0.1),
+        onVolumeDown: () => changeLocalVolume(-0.1),
+      };
+    }
+    if (phase === "ended") {
+      return {
+        onEnter: () => { if (upNext) playImmediately(upNext); },
+        onPlayPause: () => { if (upNext) playImmediately(upNext); },
+        onBack: handleBackToMenu,
+      };
+    }
+    return {};
+  });
 
   // Commandes admin reçues du tableau de bord (réf. mission "contrôler le
   // cours en mode cinéma") : appliquées à la lecture LOCALE de cet appareil.

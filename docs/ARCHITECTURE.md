@@ -143,6 +143,8 @@ Le système pilote deux canaux de diffusion vidéo **strictement indépendants**
 
 Chaque écran affiche `/kiosk` ou `/cinema` selon la sortie choisie par l'admin (`/api/settings/display-output`, ex. câble → `cinema`, réseau → `kiosk`). L'écran câblé (`127.0.0.1`, détecté par `isWiredDisplay()`) suit toujours sa sortie stockée. **Bibliothèque vide** : `/cinema` affiche un écran d'attente plein écran (grand logo + heure + « Aucun cours disponible ») au lieu d'un écran noir ; `/kiosk` a son propre écran d'attente (horloge + prochain cours). Les **catégories de cours** sont des libellés **libres** (plus de RPM/Sprint/The Trip figés) : saisie avec suggestions des catégories déjà utilisées, filtre et regroupement dynamiques.
 
+**Télécommandes physiques** (réf. hook `useKioskRemote`) : `/cinema` et `/radio` (PAS `/kiosk` ni l'admin) réagissent à une télécommande USB à dongle (présentateur / « air remote » média), vue comme un **clavier HID** — Chromium délivre ses touches en `keydown`, aucun pilote ni appairage. Mapping : flèches + OK pour parcourir la vitrine (sélection par classe `.kiosk-remote-focus` posée en JS plutôt que `:focus`, car un kiosk n'a pas toujours le focus fenêtre OS) et lancer un cours ; Espace/Play-Pause, pistes précédente/suivante, volume et touches média pour le transport. Sur `/radio`, une touche sert aussi de geste de déverrouillage de l'audio.
+
 ### Reprise après interruption (Resilience Rule)
 
 Lorsqu'une programmation automatique (`scheduler`) doit démarrer alors qu'une lecture manuelle est en cours :

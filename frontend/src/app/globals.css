@@ -3871,6 +3871,17 @@ h1, h2, h3, h4, h5, h6 {
   filter: brightness(1.3);
 }
 
+/* Télécommande à dongle (réf. demande) : la carte de cours SÉLECTIONNÉE est
+   mise en valeur nettement (halo), pour être repérable de loin sur l'écran
+   cinéma. Classe posée en JS (.kiosk-remote-focus) plutôt que `:focus` : un
+   kiosk n'a pas toujours le focus fenêtre OS, et `:focus` disparaîtrait alors. */
+.cinema-grid-layer .kiosk-remote-focus {
+  box-shadow: 0 0 0 4px var(--bg-main), 0 0 0 8px var(--accent-primary) !important;
+  border-radius: var(--radius-md);
+  transform: scale(1.04);
+  z-index: 2;
+}
+
 .cinema-card {
   flex: 0 0 300px;
   display: flex;

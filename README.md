@@ -38,6 +38,7 @@ Bobine is program-agnostic: class categories are free-form, so it fits any catal
 - **On-demand cinema kiosk** — a member-facing full-screen browser to pick and start a class themselves, with a launch animation and a "up next" countdown.
 - **Two independent display outputs** — drive a wired screen (HDMI) and a networked screen separately, each with its own content.
 - **Mobile remote** — control playback (play, pause, seek, next) from any phone on the local network.
+- **Physical remote support** — the member cinema and the radio screen respond to a plug-and-play USB remote (presenter / media "air remote"): arrow keys and OK to browse and start a class, plus play/pause, track and volume keys. No driver, no pairing — the remote is seen as a keyboard.
 - **Coach audio mode** — play audio-only classes over the room speakers with an animated or still visual background on screen.
 - **Built-in radio** — a Spotify-style 24/7 background-music player with crossfade, shuffle, repeat, and scheduled spoken reminders ("re-rack your weights", etc.).
 - **Simple library management** — drag-and-drop import, bulk upload, free-form categories, grouped selection, per-file import progress, automatic thumbnails.

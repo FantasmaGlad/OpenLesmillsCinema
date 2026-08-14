@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useAppSettings } from "@/lib/AppSettingsContext";
 import { useInterpolatedPosition } from "@/lib/useInterpolatedPosition";
 import { RadioEvent, RadioRepeatMode, RadioTrackInfo, useRadioSocket } from "@/lib/useRadioSocket";
+import { useKioskRemote } from "@/lib/useKioskRemote";
 import Icon from "@/components/Icon";
 import AppLogo from "@/components/AppLogo";
 
@@ -461,6 +462,32 @@ export default function RadioScreenPage() {
   };
   const repeatLabel =
     state.repeat === "track" ? t("radioRemote.repeatTrack") : state.repeat === "playlist" ? t("radioRemote.repeatPlaylist") : t("radioRemote.repeatOff");
+
+  // Télécommande à dongle USB (réf. demande) : transport + volume au clavier/
+  // touches média. Une touche étant un geste utilisateur, elle peut aussi
+  // débloquer l'audio depuis l'overlay « Démarrer la radio ».
+  const changeRadioVolume = (delta: number) => {
+    sendCommand("volume", { volume: Math.max(0, Math.min(100, state.volume + delta)) });
+  };
+  useKioskRemote(() => {
+    if (!unlocked) {
+      return { onEnter: handleUnlock, onPlayPause: handleUnlock };
+    }
+    if (!currentTrack) return {}; // radio inactive : rien à piloter
+    return {
+      onPlayPause: handlePlayPause,
+      onEnter: handlePlayPause,
+      onRight: () => sendCommand("radio_next_track"),
+      onNext: () => sendCommand("radio_next_track"),
+      onLeft: () => sendCommand("radio_previous_track"),
+      onPrev: () => sendCommand("radio_previous_track"),
+      onUp: () => changeRadioVolume(5),
+      onVolumeUp: () => changeRadioVolume(5),
+      onDown: () => changeRadioVolume(-5),
+      onVolumeDown: () => changeRadioVolume(-5),
+      onMute: () => sendCommand("volume", { volume: 0 }),
+    };
+  });
 
   return (
     <div className="radio-screen">
