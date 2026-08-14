@@ -1,0 +1,32 @@
+{"bobine":1,"ts":"2026-08-14T10:06:20Z","event":"run_begin","version":"2.0","total":15,"user":"fa\"n\\ta","repo":"/home/fa nta/Bob\"ine","log":"/tmp/fake.log","mode":"kiosk","dry_run":false}
+{"bobine":1,"ts":"2026-08-14T10:06:20Z","event":"step","status":"start","step":1,"total":15,"pct":0,"slug":"packages","title":"Paquets système (apt)"}
+{"bobine":1,"ts":"2026-08-14T10:06:20Z","event":"step","status":"ok","step":1,"total":15,"pct":6,"slug":"packages","title":"Paquets système (apt)"}
+{"bobine":1,"ts":"2026-08-14T10:06:20Z","event":"step","status":"start","step":2,"total":15,"pct":6,"slug":"gpu-access","title":"Accès GPU & Xwrapper"}
+{"bobine":1,"ts":"2026-08-14T10:06:20Z","event":"step","status":"ok","step":2,"total":15,"pct":13,"slug":"gpu-access","title":"Accès GPU & Xwrapper"}
+{"bobine":1,"ts":"2026-08-14T10:06:20Z","event":"step","status":"start","step":3,"total":15,"pct":13,"slug":"python-env","title":"Environnement Python"}
+{"bobine":1,"ts":"2026-08-14T10:06:20Z","event":"step","status":"ok","step":3,"total":15,"pct":20,"slug":"python-env","title":"Environnement Python"}
+{"bobine":1,"ts":"2026-08-14T10:06:20Z","event":"step","status":"start","step":4,"total":15,"pct":20,"slug":"frontend-build","title":"Build du frontend Next.js"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"skip","step":4,"total":15,"pct":26,"slug":"frontend-build","title":"Build du frontend Next.js","detail":"--skip-build"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"start","step":5,"total":15,"pct":26,"slug":"config","title":"Configuration de production"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"ok","step":5,"total":15,"pct":33,"slug":"config","title":"Configuration de production"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"start","step":6,"total":15,"pct":33,"slug":"cli-tool","title":"Script de contrôle CLI 'bobine'"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"ok","step":6,"total":15,"pct":40,"slug":"cli-tool","title":"Script de contrôle CLI 'bobine'"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"start","step":7,"total":15,"pct":40,"slug":"uninstaller","title":"Désinstalleur détaché"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"ok","step":7,"total":15,"pct":46,"slug":"uninstaller","title":"Désinstalleur détaché"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"start","step":8,"total":15,"pct":46,"slug":"backend-service","title":"Service systemd — backend"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"ok","step":8,"total":15,"pct":53,"slug":"backend-service","title":"Service systemd — backend"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"start","step":9,"total":15,"pct":53,"slug":"kiosk","title":"Kiosk Chromium (écran cinéma câblé)"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"ok","step":9,"total":15,"pct":60,"slug":"kiosk","title":"Kiosk Chromium (écran cinéma câblé)"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"start","step":10,"total":15,"pct":60,"slug":"audio","title":"Audio (auto-port…)"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"ok","step":10,"total":15,"pct":66,"slug":"audio","title":"Audio (auto-port…)"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"start","step":11,"total":15,"pct":66,"slug":"sudoers","title":"Autorisation sudo restreinte"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"ok","step":11,"total":15,"pct":73,"slug":"sudoers","title":"Autorisation sudo restreinte"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"start","step":12,"total":15,"pct":73,"slug":"ntp","title":"Synchronisation NTP"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"ok","step":12,"total":15,"pct":80,"slug":"ntp","title":"Synchronisation NTP"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"start","step":13,"total":15,"pct":80,"slug":"mdns-redirect","title":"URL locale (mDNS)"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"ok","step":13,"total":15,"pct":86,"slug":"mdns-redirect","title":"URL locale (mDNS)"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"start","step":14,"total":15,"pct":86,"slug":"watchdog","title":"Chien de garde de santé"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"ok","step":14,"total":15,"pct":93,"slug":"watchdog","title":"Chien de garde de santé"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"start","step":15,"total":15,"pct":93,"slug":"activation","title":"Activation des services"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"step","status":"ok","step":15,"total":15,"pct":100,"slug":"activation","title":"Activation des services"}
+{"bobine":1,"ts":"2026-08-14T10:06:21Z","event":"run_end","status":"ok","pct":100,"total":15,"healthy":true,"url":"http://bobine.local","port":8000,"dry_run":false}

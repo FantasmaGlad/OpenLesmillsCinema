@@ -1,0 +1,8 @@
+# Espace de travail de l'assistant d'installation graphique Bobine (réf.
+# docs/cahier-des-charges-installeur.md). Pour l'instant un seul membre : la
+# bibliothèque « core » (logique pure et testable). Le binaire Tauri (IHM +
+# SSH/mDNS réels) viendra en jalon J2, comme membre supplémentaire, sans
+# réécrire cette logique.
+[workspace]
+resolver = "2"
+members = ["core"]

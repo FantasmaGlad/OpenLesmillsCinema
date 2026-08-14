@@ -1,0 +1,11 @@
+[package]
+name = "bobine-installer-core"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Logique pure et testable de l'assistant d'installation Bobine : parse la sortie install.sh --progress=json, construit la commande d'installation distante (sudo / su - --as-user), calcule le sous-réseau /24 à sonder, et tranche l'amorçage des privilèges (sudo vs su). L'IHM Tauri (J2) s'appuiera dessus."
+repository = "https://github.com/FantasmaGlad/Bobine"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
