@@ -27,7 +27,7 @@ Ce document est écrit pour quiconque souhaite **comprendre, exploiter, modifier
 
 ### Stack technique
 
-- **Backend** : Python 3.11+, [FastAPI](https://fastapi.tiangolo.com/) + `uvicorn` (4 workers), [SQLAlchemy](https://www.sqlalchemy.org/), SQLite (`data/database.db`), Redis (bus d'état Pub/Sub, verrous distribués), `APScheduler` (planification), `watchdog` (surveillance des dossiers d'import), `ffmpeg` / VAAPI (décodage matériel Intel), Web Audio API (crossfade radio, côté navigateur).
+- **Backend** : Python 3.11+, [FastAPI](https://fastapi.tiangolo.com/) + `uvicorn` (4 workers), [SQLAlchemy](https://www.sqlalchemy.org/), SQLite (`data/database.db`), Redis (bus d'état Pub/Sub, verrous distribués), `APScheduler` (planification), `watchdog` (surveillance des dossiers d'import), `ffmpeg` / VA-API (décodage matériel Intel ou AMD, pilote choisi selon le GPU détecté), Web Audio API (crossfade radio, côté navigateur).
 - **Frontend** : [Next.js](https://nextjs.org/) 16 (App Router, export statique servi par le backend en production), React 19, TypeScript, CSS Vanilla (global + design tokens, **13 thèmes de couleurs** commutables à chaud via `:root[data-theme=…]`), PWA (`manifest.json`), WebSockets, glisser-déposer natif (HTML5), Web Audio API.
 - **Exploitation & Kiosque** : Debian 13 (Trixie), Chromium en mode kiosque (X11 / `xinit`), `systemd` (services backend, kiosque, garde audio), `avahi-daemon` (découverte mDNS).
 
@@ -196,7 +196,12 @@ sudo ./install.sh
 | `--check` | Diagnostic de l'installation existante |
 | `--skip-packages` | Mise à jour du projet (après déploiement du code, §9) sans réinstaller les paquets `apt` |
 | `--skip-build` | Ne reconstruit pas le frontend Next.js |
+| `--as-user LOGIN` | Compte cible quand le script tourne en **root direct** (Debian **sans sudo**, lancé via `su -`) — cf. ci-dessous |
 | `--uninstall [--purge] [--purge-data]` | Désinstallation progressive du système |
+
+**Détection matérielle dynamique** (réf. [`cahier-des-charges-installeur.md`](cahier-des-charges-installeur.md)) : l'installateur ne suppose plus un GPU Intel. Il détecte le GPU (`lspci`) et le CPU (`lscpu`) et installe les paquets adaptés — **Intel** : `intel-media-va-driver-non-free` (repli `i965-va-driver`) ; **AMD/Ryzen** : `mesa-va-drivers` + `firmware-amd-graphics` ; **NVIDIA** : décodage logiciel + avertissement — plus le **microcode** (`amd64-microcode`/`intel-microcode`) et le firmware Wi-Fi si une interface sans fil est présente. Les paquets non libres exigeant des composants APT absents (`non-free`, `non-free-firmware`, séparés depuis Debian 12) sont gérés en **activant ces composants** au besoin (sauvegarde `.bobine.bak` des sources).
+
+**Privilèges — deux chemins** : soit `sudo ./install.sh` depuis un compte normal (le script refuse d'être root sans compte cible) ; soit, sur un Debian minimal **sans sudo** (mot de passe root défini à l'install, utilisateur non-sudoer), en **root direct** via `su - -c "\$PWD/install.sh --as-user <login> -y"`. Le script installe alors `sudo` et pose la règle sudoers restreinte, de sorte que les boutons « Synchronisation » / « Désinstaller » de l'admin fonctionnent ensuite. Les commandes exécutées « en tant que l'utilisateur » (venv, pip, build) passent par `sudo -u` si présent, sinon `runuser`.
 
 ### Services Systemd créés
 

@@ -55,6 +55,8 @@ ${BOLD}OPTIONS${RESET}
                         (pour un poste de dev ou un serveur distinct de l'écran câblé)
       --skip-packages Ne touche pas aux paquets apt (suppose les dépendances système déjà en place)
       --skip-build    Ne reconstruit pas le frontend (suppose frontend/out déjà à jour)
+      --as-user LOGIN Compte cible quand le script tourne en root DIRECT (Debian sans sudo, lancé via 'su -').
+                        Le kiosk, les fichiers et les groupes GPU appartiendront à ce compte.
       --check         Diagnostic de l'installation existante, sans rien modifier
       --uninstall     Arrête, désactive et retire tout ce que ce script a installé
       --purge         Avec --uninstall : retire aussi venv/, node_modules/, frontend/out/ et la config
@@ -68,6 +70,7 @@ ${BOLD}EXEMPLES${RESET}
   sudo ./${SCRIPT_NAME} --dry-run             Prévisualise toutes les actions sans rien changer
   sudo ./${SCRIPT_NAME} --check               Vérifie l'état des services et affiche un résumé
   sudo ./${SCRIPT_NAME} --uninstall --purge   Désinstalle complètement (conserve les médias importés)
+  su - -c "\$PWD/${SCRIPT_NAME} --as-user fanta -y"   Machine SANS sudo : install en root direct pour le compte 'fanta'
 
 Journal complet de chaque exécution : /var/log/bobine/install-*.log
 EOF
@@ -78,6 +81,7 @@ ASSUME_YES=false
 NO_KIOSK=false
 SKIP_PACKAGES=false
 SKIP_BUILD=false
+AS_USER=""
 DO_CHECK=false
 DO_UNINSTALL=false
 DO_PURGE=false
@@ -92,6 +96,7 @@ while [[ $# -gt 0 ]]; do
         --no-kiosk) NO_KIOSK=true ;;
         --skip-packages) SKIP_PACKAGES=true ;;
         --skip-build) SKIP_BUILD=true ;;
+        --as-user) AS_USER="${2:-}"; shift ;;
         --check) DO_CHECK=true ;;
         --uninstall) DO_UNINSTALL=true ;;
         --purge) DO_PURGE=true ;;
@@ -145,6 +150,69 @@ append_file() {
     fi
 }
 
+# Exécute une commande EN TANT QUE TARGET_USER. Préfère `sudo -u` (comportement
+# éprouvé du chemin classique) et retombe sur `runuser` (util-linux, toujours
+# présent) quand sudo est absent — indispensable au chemin --as-user (Debian
+# minimal sans sudo, lancé en root via 'su -'). Respecte --dry-run.
+run_user() {
+    if $DRY_RUN; then
+        printf '  %s[dry-run]%s (utilisateur %s) %s\n' "$DIM" "$RESET" "${TARGET_USER}" "$*"
+        return 0
+    fi
+    if command -v sudo >/dev/null 2>&1; then
+        sudo -u "${TARGET_USER}" -- "$@"
+    else
+        local home
+        home="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
+        runuser -u "${TARGET_USER}" -- env "HOME=${home:-/home/${TARGET_USER}}" "$@"
+    fi
+}
+
+# Installe un paquet OPTIONNEL : ne fait JAMAIS échouer l'installation s'il est
+# indisponible (ex. composant apt non activé) — simple avertissement. Sert à la
+# détection matérielle : on tente le meilleur paquet pour le GPU/CPU présent.
+apt_optional() {
+    if $DRY_RUN; then
+        printf '  %s[dry-run]%s installerait (optionnel) %s\n' "$DIM" "$RESET" "$*"
+        return 0
+    fi
+    if apt-get install -y --no-install-recommends "$@" 2>/dev/null; then
+        ok "paquet installé : $*"
+        return 0
+    fi
+    warn "paquet indisponible, ignoré : $* (composant apt manquant ?)"
+    return 1
+}
+
+# Active les composants contrib/non-free/non-free-firmware sur les sources
+# Debian officielles s'ils manquent (requis par firmwares & pilotes non libres,
+# séparés en composants distincts depuis Debian 12). Idempotent ; sauvegarde
+# .bobine.bak avant toute édition. Gère le format deb822 (défaut de Debian 13)
+# et l'ancien /etc/apt/sources.list.
+ensure_apt_components() {
+    local want=(contrib non-free non-free-firmware) changed=false f comp
+    for f in /etc/apt/sources.list.d/*.sources; do
+        [[ -f "$f" ]] || continue
+        grep -qiE '^URIs:.*debian\.org' "$f" || continue
+        grep -qiE '^Components:' "$f" || continue
+        for comp in "${want[@]}"; do
+            grep -iE '^Components:' "$f" | grep -qw "$comp" && continue
+            [[ -f "${f}.bobine.bak" ]] || cp -a "$f" "${f}.bobine.bak"
+            sed -i -E "s/^(Components:.*)$/\1 ${comp}/I" "$f"
+            changed=true
+        done
+    done
+    if [[ -f /etc/apt/sources.list ]] \
+        && grep -qE '^[[:space:]]*deb[[:space:]].* main' /etc/apt/sources.list \
+        && ! grep -qE '^[[:space:]]*deb[[:space:]].*(contrib|non-free)' /etc/apt/sources.list; then
+        cp -a /etc/apt/sources.list /etc/apt/sources.list.bobine.bak
+        sed -i -E '/^[[:space:]]*deb[[:space:]].* main/ s/ main/ main contrib non-free non-free-firmware/' /etc/apt/sources.list
+        changed=true
+    fi
+    $changed && ok "composants apt (contrib/non-free/non-free-firmware) activés"
+    $changed
+}
+
 STEP_TOTAL=13
 STEP_CUR=0
 STEP_START_TS=0
@@ -175,19 +243,39 @@ trap on_error ERR
 if [[ $EUID -ne 0 ]]; then
     banner
     echo
-    err "Ce script doit être lancé avec sudo : sudo ./${SCRIPT_NAME} (ou --help)"
+    err "Ce script doit être lancé en root :"
+    err "  • via sudo depuis ton compte : sudo ./${SCRIPT_NAME}"
+    err "  • ou en root direct (Debian sans sudo) : su - -c \"\$PWD/${SCRIPT_NAME} --as-user <login>\""
     exit 1
 fi
 
-if [[ -z "${SUDO_USER:-}" || "${SUDO_USER}" == "root" ]]; then
+# Compte cible (propriétaire des fichiers, service kiosk, groupes GPU) :
+#  - chemin classique : SUDO_USER (le compte ayant lancé sudo) ;
+#  - chemin --as-user (root direct via 'su -', machine sans sudo, réf. cahier
+#    des charges installeur §7 « option B ») : le login fourni explicitement.
+if [[ -n "${AS_USER}" ]]; then
+    TARGET_USER="${AS_USER}"
+elif [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    TARGET_USER="${SUDO_USER}"
+else
     banner
     echo
-    err "Lance ce script via 'sudo ./${SCRIPT_NAME}' depuis ton compte utilisateur normal,"
-    err "pas en étant déjà connecté en root (SUDO_USER introuvable ou égal à root)."
+    err "Impossible de déterminer le compte cible."
+    err "Lance via 'sudo ./${SCRIPT_NAME}' depuis ton compte normal,"
+    err "ou en root (su -) avec '--as-user <login>' — ex. su - -c \"\$PWD/${SCRIPT_NAME} --as-user fanta -y\"."
     exit 1
 fi
 
-TARGET_USER="${SUDO_USER}"
+if ! id "${TARGET_USER}" >/dev/null 2>&1; then
+    banner; echo
+    err "Le compte cible '${TARGET_USER}' n'existe pas sur cette machine."
+    exit 1
+fi
+if [[ "${TARGET_USER}" == "root" ]]; then
+    banner; echo
+    err "Le compte cible ne peut pas être root (le kiosk et les fichiers doivent appartenir à un utilisateur normal)."
+    exit 1
+fi
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="${REPO_DIR}/backend"
 FRONTEND_DIR="${REPO_DIR}/frontend"
@@ -386,6 +474,7 @@ else
         curl \
         ca-certificates \
         gnupg \
+        sudo \
         redis-server \
         avahi-daemon \
         nftables
@@ -396,20 +485,56 @@ else
     run systemctl enable --now redis-server
     ok "redis-server actif"
 
-    # Pilote VAAPI Intel (décodage matériel H.264/HEVC). La variante non-free
-    # couvre plus de profils (HEVC Main10) ; repli sur la variante libre si le
-    # dépôt non-free n'est pas activé sur la machine.
-    if $DRY_RUN; then
-        echo "  ${DIM}[dry-run]${RESET} installerait le pilote VAAPI (non-free, repli libre si indisponible)"
-    else
-        if ! apt-get install -y --no-install-recommends intel-media-va-driver-non-free 2>/dev/null; then
-            warn "intel-media-va-driver-non-free indisponible (dépôt 'non-free' non activé ?)."
-            warn "Installation de la variante libre à la place — le support HEVC 10 bits peut être limité."
-            warn "Pour le pilote complet : active 'non-free' dans /etc/apt/sources.list puis relance ce script."
-            apt-get install -y --no-install-recommends intel-media-va-driver || true
-        else
-            ok "Pilote VAAPI Intel (non-free) installé"
+    # ----------------------------------------------------------------------
+    # Détection matérielle DYNAMIQUE (GPU/CPU/firmware) : on adapte les paquets
+    # au matériel RÉEL au lieu d'un Intel figé — la cible varie (Intel, AMD/
+    # Ryzen, éventuellement NVIDIA). lspci/lscpu font partie de la base Debian.
+    # ----------------------------------------------------------------------
+    GPU_LINES="$(lspci -nn 2>/dev/null | grep -Ei 'VGA compatible controller|3D controller|Display controller' || true)"
+    HAS_INTEL_GPU=false; HAS_AMD_GPU=false; HAS_NVIDIA_GPU=false
+    grep -qiE '\[8086:' <<<"$GPU_LINES" && HAS_INTEL_GPU=true
+    grep -qiE '\[1002:' <<<"$GPU_LINES" && HAS_AMD_GPU=true
+    grep -qiE '\[10de:' <<<"$GPU_LINES" && HAS_NVIDIA_GPU=true
+    CPU_VENDOR="$(LC_ALL=C lscpu 2>/dev/null | awk -F: '/Vendor ID/{gsub(/^[ \t]+/,"",$2);print $2; exit}')"
+    log "Matériel détecté — GPU: Intel=$HAS_INTEL_GPU AMD=$HAS_AMD_GPU NVIDIA=$HAS_NVIDIA_GPU | CPU=${CPU_VENDOR:-inconnu}"
+
+    # Les pilotes/firmwares non libres exigent les composants non-free* : on les
+    # active AVANT si du matériel en a besoin, puis on rafraîchit apt (réf.
+    # docs/cahier-des-charges-installeur.md §9).
+    if $HAS_INTEL_GPU || $HAS_AMD_GPU || $HAS_NVIDIA_GPU; then
+        if ! $DRY_RUN && ensure_apt_components; then
+            run apt-get update -qq || true
         fi
+    fi
+
+    # Microcode CPU (stabilité/sécurité) selon le vendeur détecté.
+    case "$CPU_VENDOR" in
+        *AuthenticAMD*|*AMD*)     apt_optional amd64-microcode ;;
+        *GenuineIntel*|*Intel*)   apt_optional intel-microcode ;;
+    esac
+
+    # Pilote VA-API (décodage vidéo matériel) selon le GPU détecté.
+    if $HAS_INTEL_GPU; then
+        apt_optional intel-media-va-driver-non-free || apt_optional i965-va-driver
+    fi
+    if $HAS_AMD_GPU; then
+        # radeonsi (Mesa) fournit le VA-API des GPU/APU AMD (Ryzen inclus).
+        apt_optional mesa-va-drivers
+        apt_optional firmware-amd-graphics
+    fi
+    if $HAS_NVIDIA_GPU && ! $HAS_INTEL_GPU && ! $HAS_AMD_GPU; then
+        warn "GPU NVIDIA seul détecté : pas de pilote propriétaire installé (hors périmètre v1)."
+        warn "Le décodage vidéo se fera en logiciel — surveiller la charge CPU sur l'écran réseau."
+    fi
+
+    # Firmware générique souvent nécessaire sur une base minimale (Wi-Fi/divers).
+    apt_optional firmware-linux-free
+    apt_optional firmware-misc-nonfree
+    if ip -o link 2>/dev/null | grep -qiE ': wl'; then
+        log "Interface Wi-Fi détectée : firmware sans fil"
+        apt_optional firmware-iwlwifi
+        apt_optional firmware-realtek
+        apt_optional firmware-atheros
     fi
 
     # Node.js (build du frontend Next.js en export statique) : la version des
@@ -462,14 +587,14 @@ fi
 step "Environnement Python & dépendances backend"
 # ---------------------------------------------------------------------------
 if [[ ! -d "${VENV_DIR}" ]]; then
-    run sudo -u "${TARGET_USER}" python3 -m venv "${VENV_DIR}"
+    run_user python3 -m venv "${VENV_DIR}"
     ok "venv créé : ${VENV_DIR}"
 else
     ok "venv déjà présent : ${VENV_DIR}"
 fi
 PIP_QUIET="-q"; $VERBOSE && PIP_QUIET=""
-run sudo -u "${TARGET_USER}" "${VENV_DIR}/bin/pip" install --upgrade pip ${PIP_QUIET}
-run sudo -u "${TARGET_USER}" "${VENV_DIR}/bin/pip" install -r "${BACKEND_DIR}/requirements.txt" ${PIP_QUIET}
+run_user "${VENV_DIR}/bin/pip" install --upgrade pip ${PIP_QUIET}
+run_user "${VENV_DIR}/bin/pip" install -r "${BACKEND_DIR}/requirements.txt" ${PIP_QUIET}
 step_done
 
 # ---------------------------------------------------------------------------
@@ -482,7 +607,7 @@ if $SKIP_BUILD; then
         exit 1
     fi
 else
-    run sudo -u "${TARGET_USER}" bash -c "cd '${FRONTEND_DIR}' && npm install --no-audit --no-fund && npm run build"
+    run_user bash -c "cd '${FRONTEND_DIR}' && npm install --no-audit --no-fund && npm run build"
     if [[ ! -d "${FRONTEND_DIR}/out" ]] && ! $DRY_RUN; then
         err "le build frontend n'a pas produit de dossier out/. Abandon."
         exit 1
