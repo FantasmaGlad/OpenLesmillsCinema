@@ -51,3 +51,40 @@ jobs:
           pip install -r backend/requirements.txt
       - name: Syntax check (compile all sources)
         run: python -m compileall -q backend/app scripts
+
+  assistant-core:
+    name: Assistant core (Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: assistant
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            assistant/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('assistant/**/Cargo.toml', 'assistant/Cargo.lock') }}
+      - name: Clippy (warnings = erreurs)
+        run: |
+          rustup component add clippy
+          cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+
+  install-script:
+    name: install.sh sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Vérification de syntaxe bash
+        run: bash -n install.sh
+      - name: Le compteur d'étapes STEP_TOTAL reflète le nombre d'appels à step()
+        run: |
+          declared=$(grep -oE '^STEP_TOTAL=[0-9]+' install.sh | head -1 | cut -d= -f2)
+          actual=$(grep -cE '^[[:space:]]*step ' install.sh)
+          echo "STEP_TOTAL=${declared} ; appels step()=${actual}"
+          test "${declared}" = "${actual}"
