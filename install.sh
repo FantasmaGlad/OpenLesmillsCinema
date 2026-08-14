@@ -196,7 +196,7 @@ CONFIG_DIR="/etc/bobine"
 CONFIG_FILE="${CONFIG_DIR}/config.toml"
 SERVICE_PORT=8000
 KIOSK_URL="http://127.0.0.1:${SERVICE_PORT}/kiosk"
-UNITS=(bobine-backend bobine-kiosk bobine-audio-guard bobine-redirect)
+UNITS=(bobine-backend bobine-kiosk bobine-audio-guard bobine-redirect bobine-watchdog)
 
 LOG_DIR="/var/log/bobine"
 mkdir -p "${LOG_DIR}" 2>/dev/null || LOG_DIR="/tmp"
@@ -221,6 +221,10 @@ if $DO_UNINSTALL; then
             step_skip "${unit}.service non installé"
         fi
     done
+    # Le chien de garde est piloté par un TIMER (l'unité .service ci-dessus est
+    # déclenchée par lui) : retirer aussi le timer.
+    run systemctl disable --now bobine-watchdog.timer 2>/dev/null || true
+    run rm -f /etc/systemd/system/bobine-watchdog.timer
     run systemctl daemon-reload
 
     run rm -f /etc/sudoers.d/bobine
@@ -1018,6 +1022,42 @@ ok "redirection du port 80 configurée"
 step_done
 
 # ---------------------------------------------------------------------------
+step "Chien de garde de santé (watchdog)"
+# ---------------------------------------------------------------------------
+# Redémarrage AUTOMATIQUE d'un composant mort en consommant /api/health (Redis,
+# base SQLite, kiosque Chromium). Complète `Restart=always` de systemd, qui ne
+# couvre que la mort du *processus*, pas les défaillances *logiques* (backend
+# vivant mais Redis injoignable, Chromium gelé…). Piloté par un TIMER systemd
+# (pas de process résident). Distinct du garde AUDIO (`bobine-audio-guard`, un
+# oneshot qui coupe le son hors session kiosk) : rôles séparés.
+run chmod +x "${REPO_DIR}/scripts/watchdog.sh"
+write_file /etc/systemd/system/bobine-watchdog.service <<EOF
+[Unit]
+Description=Bobine - Chien de garde santé (redémarre un composant mort)
+After=bobine-backend.service
+
+[Service]
+Type=oneshot
+ExecStart=${REPO_DIR}/scripts/watchdog.sh
+EOF
+write_file /etc/systemd/system/bobine-watchdog.timer <<'EOF'
+[Unit]
+Description=Bobine - Declenche le chien de garde sante periodiquement
+
+[Timer]
+# Laisse le systeme finir de booter avant la premiere passe (evite de lutter
+# contre le demarrage normal des services), puis une passe toutes les 30 s.
+OnBootSec=90s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
+EOF
+ok "chien de garde santé (watchdog) écrit"
+step_done
+
+# ---------------------------------------------------------------------------
 step "Activation des services & vérification de santé"
 # ---------------------------------------------------------------------------
 run systemctl daemon-reload
@@ -1025,6 +1065,8 @@ if ! $NO_KIOSK; then
     run systemctl enable --now bobine-audio-guard.service
 fi
 run systemctl enable --now bobine-backend.service
+# Chien de garde : actif dans tous les modes (surveille au moins le backend).
+run systemctl enable --now bobine-watchdog.timer
 if ! $NO_KIOSK; then
     run systemctl enable --now bobine-kiosk.service
 fi

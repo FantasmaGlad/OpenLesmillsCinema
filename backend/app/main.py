@@ -3,6 +3,7 @@ import logging
 import time
 import logging.handlers
 import tempfile
+import subprocess
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -10,11 +11,13 @@ import aiofiles
 from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import init_db, get_db
+from app.database import init_db, get_db, SessionLocal
+from app.utils.redis_client import get_redis
 from app.models import AudioTrack, Background, RadioAnnouncement, RadioTrack, Video
 from app.playback_manager import get_all_playback_managers
 from app.radio_manager import get_radio_manager
@@ -153,9 +156,53 @@ app.include_router(logs.router)
 app.include_router(import_jobs.router)
 
 
+def _kiosk_process_alive() -> str:
+    """Présence d'un processus Chromium kiosque sur la machine (le backend
+    tourne sur le même hôte). "unknown" si pgrep est indisponible (ex. poste de
+    dev sans le service kiosk)."""
+    for name in ("chromium", "chromium-browser", "chrome"):
+        try:
+            if subprocess.run(["pgrep", "-x", name], capture_output=True, timeout=3).returncode == 0:
+                return "ok"
+        except Exception:
+            return "unknown"
+    return "down"
+
+
 @app.get("/api/health")
-def health():
-    return {"status": "ok"}
+async def health():
+    """Contrôle de santé lisible par machine, consommé par le chien de garde
+    `bobine-watchdog` (redémarrage auto d'un composant mort) et par toute
+    supervision externe. Vérifie les dépendances critiques du backend — **Redis**
+    (bus d'état inter-workers) et la base **SQLite** — plus, à titre indicatif,
+    la présence du **kiosque Chromium**. Renvoie HTTP 200 si Redis ET la base
+    répondent, sinon 503. L'état du kiosque n'influe PAS sur le code HTTP : c'est
+    un composant séparé, que le chien de garde redémarre indépendamment du
+    backend."""
+    components: dict[str, str] = {}
+
+    try:
+        components["redis"] = "ok" if await get_redis().ping() else "down"
+    except Exception:
+        components["redis"] = "down"
+
+    try:
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+        finally:
+            db.close()
+        components["database"] = "ok"
+    except Exception:
+        components["database"] = "down"
+
+    components["kiosk"] = _kiosk_process_alive()
+
+    healthy = components["redis"] == "ok" and components["database"] == "ok"
+    payload = {"status": "ok" if healthy else "degraded", "components": components}
+    if not healthy:
+        return JSONResponse(status_code=503, content=payload)
+    return payload
 
 
 @app.get("/api/time")
