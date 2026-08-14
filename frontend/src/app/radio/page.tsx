@@ -41,7 +41,8 @@ function formatTime(seconds: number | null | undefined) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function formatClock(date: Date) {
+function formatClock(date: Date | null) {
+  if (!date) return "--:--";
   return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
 }
 
@@ -385,7 +386,15 @@ export default function RadioScreenPage() {
 
   const livePosition = useInterpolatedPosition(state.position_seconds, state.playing, lastCause);
 
-  const [now, setNow] = useState(new Date());
+  // null au premier rendu (plutôt que new Date()) : réglage react-hooks/purity
+  // + correctif hydratation (React error #418, réf. retour user) — new Date()
+  // évalué pendant le rendu produit une valeur DIFFÉRENTE à la génération de
+  // l'export statique (figée au moment du `npm run build`) et à l'hydratation
+  // côté client (l'instant réel où la page s'ouvre, potentiellement des jours
+  // après) : React détecte l'écart et rejette tout le HTML pré-rendu. La vraie
+  // heure n'est posée qu'ici, dans l'effet ci-dessous (hors rendu, après
+  // hydratation) — formatClock affiche "--:--" le temps de ce premier réglage.
+  const [now, setNow] = useState<Date | null>(null);
   const clockOffsetRef = useRef(0);
   useEffect(() => {
     const syncClock = () => {
@@ -397,6 +406,7 @@ export default function RadioScreenPage() {
         .catch(() => {});
     };
     syncClock();
+    setNow(new Date(Date.now() + clockOffsetRef.current));
     const syncId = setInterval(syncClock, 60 * 1000);
     const tickId = setInterval(() => setNow(new Date(Date.now() + clockOffsetRef.current)), 1000);
     return () => {
