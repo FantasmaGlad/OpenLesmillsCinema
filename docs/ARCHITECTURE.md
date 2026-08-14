@@ -108,6 +108,8 @@ La configuration est chargée selon l'ordre de priorité suivant :
 
 Le backend tourne en plusieurs workers `uvicorn` sous le même processus maître. Redis sert de **bus d'état partagé** (position de lecture, décompte inter-cours, verrous de tick `tick_lock.py`, synchronisation de planning) et de canal de diffusion Pub/Sub pour les WebSockets. Un client web reste parfaitement synchronisé quel que soit le worker traitant la requête HTTP.
 
+> ⚠️ **Piège archi-connu, reproduit une fois (réf. correctif radio 2026-08-14)** : chaque worker exécute **sa propre copie** de tout code qui tourne à son démarrage (le bloc `lifespan` de `main.py`) ou sur son **propre** `AsyncIOScheduler` (le planning). Toute action qui ne doit avoir lieu **qu'une seule fois** par lancement de service (auto-démarrage, déclenchement d'une programmation à l'heure dite…) doit donc être protégée par un **verrou distribué Redis** (`SET NX PX`, cf. `tick_lock.py::acquire_tick_lock` et `scheduler_manager.py::_acquire_fire_lock`) — un seul worker agit, les autres convergent via la diffusion Redis (`apply_remote_state`), à condition que `ws_manager.start_redis_listener()` ait déjà été appelé sur CE worker (l'ordre des étapes du `lifespan` compte). Oubli constaté : l'auto-démarrage radio (§5) appelait `RadioPlaybackManager.load_playlist(..., shuffle=True)` sans ce verrou → les 4 workers tiraient chacun leur propre ordre aléatoire, donnant 4 états divergents en mémoire et des pistes qui semblaient « switcher » selon le worker qui répondait à la requête.
+
 ### Arborescence backend (`backend/app/`)
 
 - `main.py` : Entrée de l'application FastAPI, initialisation des routes, des événements de démarrage (`boot_state.py`) et du serveur d'assets statiques.
