@@ -228,6 +228,15 @@ export function usePlaybackSocket(
   // Commandes émises pendant une (re)connexion, rejouées à l'ouverture si
   // récentes (< 5 s) — voir sendCommand.
   const pendingCommandsRef = useRef<{ payload: string; queuedAt: number }[]>([]);
+  // Détection d'un backend redémarré depuis le chargement de CETTE page (réf.
+  // retour user "un redémarrage ne resynchronise pas tous les écrans") : null
+  // jusqu'au premier "boot_id" reçu (valeur de référence pour cette page) ;
+  // une valeur DIFFÉRENTE à une reconnexion ultérieure signale que le backend
+  // a redémarré entre-temps (reboot machine, watchdog, crash...) — l'écran ne
+  // faisait jusqu'ici que reconnecter son WebSocket, en gardant en mémoire son
+  // ancien bundle JS/HTML au lieu de se recharger comme le fait le bouton
+  // « Synchronisation des écrans ».
+  const bootIdRef = useRef<string | null>(null);
   const onEventRef = useRef(onEvent);
   const onCinemaCommandRef = useRef(onCinemaCommand);
   // Miroir de `state` lisible en dehors du cycle de rendu React (correctif
@@ -313,6 +322,16 @@ export function usePlaybackSocket(
             // Keepalive serveur (réf. Phase 3, P7) : répondre immédiatement
             // pour signaler que cette connexion est toujours vivante.
             ws.send(JSON.stringify({ command: "pong" }));
+            return;
+          }
+          if (parsed.event === "boot_id") {
+            if (bootIdRef.current === null) {
+              bootIdRef.current = parsed.boot_id;
+            } else if (bootIdRef.current !== parsed.boot_id) {
+              // Le backend a redémarré depuis le chargement de cette page :
+              // même traitement que "force_reload" (vide les caches, recharge).
+              void clearCachesAndReload();
+            }
             return;
           }
           if (parsed.event === "kiosk_role") {

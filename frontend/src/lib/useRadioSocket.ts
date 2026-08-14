@@ -109,6 +109,12 @@ export function useRadioSocket(onEvent?: (evt: RadioEvent) => void, role?: "kios
   const pendingCommandsRef = useRef<{ payload: string; queuedAt: number }[]>([]);
   const onEventRef = useRef(onEvent);
   const stateRef = useRef<RadioState>(DEFAULT_STATE);
+  // Détection d'un backend redémarré depuis le chargement de CETTE page (réf.
+  // retour user "un redémarrage ne resynchronise pas tous les écrans") — même
+  // patron que usePlaybackSocket.ts : null jusqu'au premier "boot_id" reçu
+  // (référence pour cette page), une valeur différente à une reconnexion
+  // ultérieure signale un redémarrage backend entre-temps.
+  const bootIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     onEventRef.current = onEvent;
@@ -151,6 +157,14 @@ export function useRadioSocket(onEvent?: (evt: RadioEvent) => void, role?: "kios
           const parsed = JSON.parse(evt.data);
           if (parsed.event === "ping") {
             ws.send(JSON.stringify({ command: "pong" }));
+            return;
+          }
+          if (parsed.event === "boot_id") {
+            if (bootIdRef.current === null) {
+              bootIdRef.current = parsed.boot_id;
+            } else if (bootIdRef.current !== parsed.boot_id) {
+              void clearCachesAndReload();
+            }
             return;
           }
           if (parsed.event === "kiosk_role") {

@@ -18,6 +18,7 @@ from app.radio_manager import init_radio_manager, get_radio_manager
 from app.routers.settings import get_display_output_value
 from app.scheduler_manager import ensure_utc, resolve_target_title
 from app.utils.activity_log import log_activity
+from app.utils.boot_state import current_boot_id
 from app.utils.importer import is_image_background
 from app.utils.ws_manager import manager as ws_manager
 
@@ -236,6 +237,16 @@ async def playback_ws(websocket: WebSocket, db: Session = Depends(get_db)):
     kiosk_channel = DEFAULT_CHANNEL
     kiosk_client_id = ""
     try:
+        # Réf. retour user « un redémarrage ne resynchronise pas tous les
+        # écrans » : un écran réseau/radio ouvert depuis un moment ne fait que
+        # RECONNECTER son WebSocket après un restart backend (reboot machine,
+        # watchdog, crash...) — sans ce message, il resynchronise son ÉTAT
+        # mais continue de tourner sur son ANCIEN bundle JS/HTML en mémoire.
+        # `current_boot_id()` change à chaque lancement du service (cf.
+        # boot_state.py) ; le client compare à la valeur vue à SA connexion
+        # initiale et se recharge complètement (comme le bouton
+        # « Synchronisation des écrans ») si elle a changé depuis.
+        await websocket.send_json({"event": "boot_id", "boot_id": current_boot_id()})
         # Envoi immédiat de l'état courant DES DEUX CANAUX au nouveau client
         # (kiosk ou télécommande) : chaque message porte son champ channel,
         # le client ne garde que celui de son canal. Le champ is_primary
