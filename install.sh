@@ -1222,6 +1222,25 @@ fi
 # explicitement (unité + socket) avant activation. Échec toléré : le mDNS est
 # un confort, l'accès par http://<IP>:8000 reste toujours valable.
 run systemctl unmask avahi-daemon.service avahi-daemon.socket >/dev/null 2>&1 || true
+
+# Réf. "bobine.local injoignable après un redémarrage complet, alors que
+# 'systemctl restart avahi-daemon' seul fonctionnait" : l'unité avahi-daemon
+# livrée par Debian ne dépend QUE de sysinit.target/basic.target, pas de
+# network-online.target — rien sur cette machine ne tire cette cible non
+# plus (NetworkManager-wait-online.service est activable mais jamais
+# sollicité). Au premier restart après install, l'interface avait déjà son
+# bail DHCP depuis longtemps donc ça passait inaperçu ; à un boot à froid,
+# avahi peut démarrer avant que l'interface réseau ait une adresse. avahi
+# republie normalement dès qu'il détecte le changement d'interface (netlink),
+# mais ce filet dépendait jusqu'ici du hasard du timing plutôt que d'être
+# garanti — on le rend explicite.
+run mkdir -p /etc/systemd/system/avahi-daemon.service.d
+write_file /etc/systemd/system/avahi-daemon.service.d/10-wait-network-online.conf <<'EOF'
+[Unit]
+After=network-online.target
+Wants=network-online.target
+EOF
+run systemctl daemon-reload
 run systemctl enable avahi-daemon >/dev/null 2>&1 || true
 if ! $DRY_RUN && ! systemctl restart avahi-daemon; then
     warn "Impossible de démarrer avahi-daemon : l'URL bobine.local ne sera pas publiée."
