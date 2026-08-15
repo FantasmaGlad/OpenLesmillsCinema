@@ -475,8 +475,24 @@ export default function RadioScreenPage() {
   // rechargement à la même position (souvent suffisant pour un hoquet Wi-Fi
   // passager) ; si ça ne suffit pas, on traite ça comme une fin de piste pour
   // que le serveur avance normalement plutôt que de rester bloqué en silence.
+  //
+  // CORRECTIF (réf. retour user "rappel qui se lance par-dessus sans fade" +
+  // "chevauchement de plusieurs pistes", malgré 0 règle temporelle définie) :
+  // un unique contrôle ponctuel à RECOVERY_GRACE_MS donnait de FAUX abandons
+  // — sur un réseau déjà en difficulté (raison même du déclenchement), un
+  // rechargement peut légitimement prendre plus de 5 s à reprendre. Quand ça
+  // arrivait, on envoyait `radio_track_ended` au serveur ALORS QUE la reprise
+  // avait réussi et que la musique rejouait déjà : le serveur croyait la
+  // piste finie (ambiance "toutes les N musiques" → annonce en mode
+  // `wait_end`, qui ne baisse JAMAIS la musique — normal, elle est censée
+  // être silencieuse à ce stade) et avançait, d'où un rappel plaqué sur une
+  // musique bien vivante, sans fade, et potentiellement un chevauchement
+  // avec la piste suivante. Fix : on VÉRIFIE PLUSIEURS FOIS (pas un coup
+  // isolé) et on annule l'abandon dès qu'un vrai `timeupdate` revient,
+  // laissant une vraie chance à une reprise simplement lente.
   // ------------------------------------------------------------------
-  const RECOVERY_GRACE_MS = 5000;
+  const RECOVERY_GRACE_MS = 10000;
+  const RECOVERY_POLL_MS = 1000;
 
   // useCallback (identité stable via `sendCommand`, lui-même stable) : appelée
   // depuis le watchdog ci-dessous, qui ne doit pas recréer son `setInterval`
@@ -496,14 +512,24 @@ export default function RadioScreenPage() {
       }
       if (unlockedRef.current) el.play().catch(() => {});
     }
-    lastProgressRef.current[slot] = Date.now();
-    setTimeout(() => {
+    const attemptStartedAt = Date.now();
+    lastProgressRef.current[slot] = attemptStartedAt;
+    const pollId = setInterval(() => {
+      // Un vrai timeupdate est revenu APRÈS le début de cette tentative : la
+      // reprise a fonctionné (fût-elle lente), on arrête là sans rien signaler
+      // au serveur — la piste n'a jamais vraiment fini.
+      if (lastProgressRef.current[slot] > attemptStartedAt) {
+        clearInterval(pollId);
+        recoveringRef.current = false;
+        return;
+      }
+      if (Date.now() - attemptStartedAt < RECOVERY_GRACE_MS) return;
+      clearInterval(pollId);
       recoveringRef.current = false;
-      const stillStuck = Date.now() - lastProgressRef.current[slot] >= RECOVERY_GRACE_MS;
-      if (stillStuck && slot === activeSlotRef.current && playingRef.current && !activeAnnouncementRef.current) {
+      if (slot === activeSlotRef.current && playingRef.current && !activeAnnouncementRef.current) {
         sendCommand("radio_track_ended");
       }
-    }, RECOVERY_GRACE_MS);
+    }, RECOVERY_POLL_MS);
   }, [sendCommand]);
 
   const handleErrorForSlot = (slot: Slot) => {
