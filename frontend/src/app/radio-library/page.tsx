@@ -131,8 +131,19 @@ export default function RadioLibraryPage() {
   const [editingPlaylist, setEditingPlaylist] = useState<PlaylistDetail | null>(null);
   const [addTrackSearch, setAddTrackSearch] = useState("");
   const [playlistToDelete, setPlaylistToDelete] = useState<PlaylistSummary | null>(null);
+  const [addingTrackId, setAddingTrackId] = useState<number | null>(null);
   const dragIndexRef = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  // Sérialise toutes les mutations d'UNE playlist (ajout/retrait/renommage/
+  // réordonnancement) : chacune part de l'état serveur le plus frais plutôt
+  // que d'une valeur capturée au moment du clic, et attend son tour derrière
+  // la précédente. Sans ça, un blur de renommage (PUT snapshot des items) et
+  // un clic "Ajouter" (POST) peuvent partir en parallèle ; celui qui répond
+  // en second écrase le résultat de l'autre — un ajout pouvait disparaître
+  // silencieusement.
+  const playlistMutationRef = useRef<Promise<unknown>>(Promise.resolve());
+  const editingPlaylistRef = useRef<PlaylistDetail | null>(null);
+  useEffect(() => { editingPlaylistRef.current = editingPlaylist; }, [editingPlaylist]);
 
   // Tags
   const [newTagName, setNewTagName] = useState("");
@@ -406,6 +417,28 @@ export default function RadioLibraryPage() {
   };
 
   // ---- Playlists ----
+  // Rafraîchissement léger (compteurs de la barre latérale) après une
+  // mutation de playlist — un refreshAll() complet (5 requêtes, tracks/
+  // artistes/albums/tags compris) à chaque ajout de morceau provoquait un
+  // reflow de toute la page sous le tiroir ouvert, donnant l'impression que
+  // le panneau « se refermait sur lui-même ».
+  const refreshPlaylistsSummary = async () => {
+    setPlaylists(await fetchJson<PlaylistSummary[]>("/radio/playlists", []));
+  };
+
+  // Chaîne toutes les mutations d'une même playlist (ajout, retrait,
+  // renommage, réordonnancement) les unes après les autres : chacune lit
+  // l'état serveur le plus frais (editingPlaylistRef) au moment où elle
+  // s'exécute réellement, pas au moment du clic. Évite qu'un renommage
+  // (PUT avec un instantané des morceaux) et un ajout (POST) partis en
+  // parallèle ne se marchent dessus — celui qui répond en second écrasait
+  // silencieusement le résultat de l'autre.
+  const queuePlaylistMutation = (fn: () => Promise<void>) => {
+    const run = playlistMutationRef.current.then(fn, fn);
+    playlistMutationRef.current = run.catch(() => undefined);
+    return run;
+  };
+
   const openPlaylist = async (id: number) => {
     const detail = await fetchJson<PlaylistDetail | null>(`/radio/playlists/${id}`, null);
     if (detail) setEditingPlaylist(detail);
@@ -424,12 +457,15 @@ export default function RadioLibraryPage() {
         const detail: PlaylistDetail = await res.json();
         setNewPlaylistName("");
         showToast(t("radioLibrary.playlistCreatedToast"));
-        await refreshAll();
         setEditingPlaylist(detail);
+        refreshPlaylistsSummary();
       } else showToast(t("radioLibrary.playlistError"), "error");
     } catch { showToast(t("radioLibrary.playlistError"), "error"); }
   };
 
+  // Sauvegarde bas niveau (PUT complet nom + morceaux) : n'est plus appelée
+  // qu'à travers queuePlaylistMutation ci-dessous, jamais directement, pour
+  // que ses écritures restent sérialisées avec les autres mutations.
   const savePlaylist = async (id: number, name: string, trackIds: number[]) => {
     try {
       const res = await fetch(getApiUrl(`/radio/playlists/${id}`), {
@@ -439,7 +475,7 @@ export default function RadioLibraryPage() {
       if (res.ok) {
         const detail: PlaylistDetail = await res.json();
         setEditingPlaylist(detail);
-        refreshAll();
+        refreshPlaylistsSummary();
         return true;
       }
     } catch { /* fallthrough */ }
@@ -447,25 +483,41 @@ export default function RadioLibraryPage() {
     return false;
   };
 
-  const removeFromPlaylist = (trackId: number) => {
-    if (!editingPlaylist) return;
-    const ids = editingPlaylist.items.map((i) => i.track.id).filter((id) => id !== trackId);
-    savePlaylist(editingPlaylist.id, editingPlaylist.name, ids);
+  const renamePlaylist = (name: string) => {
+    queuePlaylistMutation(async () => {
+      const current = editingPlaylistRef.current;
+      if (!current || current.name === name) return;
+      await savePlaylist(current.id, name, current.items.map((i) => i.track.id));
+    });
   };
 
-  const addToPlaylist = async (trackId: number) => {
-    if (!editingPlaylist) return;
-    try {
-      const res = await fetch(getApiUrl(`/radio/playlists/${editingPlaylist.id}/tracks`), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ track_id: trackId }),
-      });
-      if (res.ok) {
-        const detail: PlaylistDetail = await res.json();
-        setEditingPlaylist(detail);
-        refreshAll();
-      } else showToast(t("radioLibrary.playlistError"), "error");
-    } catch { showToast(t("radioLibrary.playlistError"), "error"); }
+  const removeFromPlaylist = (trackId: number) => {
+    queuePlaylistMutation(async () => {
+      const current = editingPlaylistRef.current;
+      if (!current) return;
+      const ids = current.items.map((i) => i.track.id).filter((id) => id !== trackId);
+      await savePlaylist(current.id, current.name, ids);
+    });
+  };
+
+  const addToPlaylist = (trackId: number) => {
+    const current = editingPlaylistRef.current;
+    if (!current) return;
+    setAddingTrackId(trackId);
+    queuePlaylistMutation(async () => {
+      try {
+        const res = await fetch(getApiUrl(`/radio/playlists/${current.id}/tracks`), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ track_id: trackId }),
+        });
+        if (res.ok) {
+          const detail: PlaylistDetail = await res.json();
+          setEditingPlaylist(detail);
+          refreshPlaylistsSummary();
+        } else showToast(t("radioLibrary.playlistError"), "error");
+      } catch { showToast(t("radioLibrary.playlistError"), "error"); }
+      finally { setAddingTrackId((id) => (id === trackId ? null : id)); }
+    });
   };
 
   // Réordonnancement glisser-déposer (natif HTML5, pas de dépendance).
@@ -473,24 +525,31 @@ export default function RadioLibraryPage() {
     const from = dragIndexRef.current;
     dragIndexRef.current = null;
     setDragOverIndex(null);
-    if (from === null || from === dropIndex || !editingPlaylist) return;
-    const ids = editingPlaylist.items.map((i) => i.track.id);
-    const [moved] = ids.splice(from, 1);
-    ids.splice(dropIndex, 0, moved);
-    savePlaylist(editingPlaylist.id, editingPlaylist.name, ids);
+    if (from === null || from === dropIndex) return;
+    queuePlaylistMutation(async () => {
+      const current = editingPlaylistRef.current;
+      if (!current) return;
+      const ids = current.items.map((i) => i.track.id);
+      const [moved] = ids.splice(from, 1);
+      ids.splice(dropIndex, 0, moved);
+      await savePlaylist(current.id, current.name, ids);
+    });
   };
 
-  const toggleDefault = async () => {
-    if (!editingPlaylist) return;
-    const method = editingPlaylist.is_default ? "DELETE" : "PUT";
-    try {
-      const res = await fetch(getApiUrl(`/radio/playlists/${editingPlaylist.id}/default`), { method });
-      if (res.ok) {
-        const detail: PlaylistDetail = await res.json();
-        setEditingPlaylist(detail);
-        refreshAll();
-      } else showToast(t("radioLibrary.playlistError"), "error");
-    } catch { showToast(t("radioLibrary.playlistError"), "error"); }
+  const toggleDefault = () => {
+    queuePlaylistMutation(async () => {
+      const current = editingPlaylistRef.current;
+      if (!current) return;
+      const method = current.is_default ? "DELETE" : "PUT";
+      try {
+        const res = await fetch(getApiUrl(`/radio/playlists/${current.id}/default`), { method });
+        if (res.ok) {
+          const detail: PlaylistDetail = await res.json();
+          setEditingPlaylist(detail);
+          refreshPlaylistsSummary();
+        } else showToast(t("radioLibrary.playlistError"), "error");
+      } catch { showToast(t("radioLibrary.playlistError"), "error"); }
+    });
   };
 
   const confirmDeletePlaylist = async () => {
@@ -931,82 +990,117 @@ export default function RadioLibraryPage() {
         </>
       )}
 
-      {/* ==================== DRAWER : édition d'une playlist ==================== */}
+      {/* ==================== DRAWER : édition d'une playlist (façon "Ajouter à la playlist" YouTube Music : liste unique, recherche épinglée, pas de double zone de scroll imbriquée) ==================== */}
       {editingPlaylist && (
         <>
           <div className="detail-drawer-overlay" onClick={() => setEditingPlaylist(null)} />
-          <div className="detail-drawer">
-            <div className="drawer-header">
-              <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0 }}>{t("radioLibrary.editPlaylistTitle")}</h3>
+          <div className="detail-drawer rl-pl-drawer">
+            <div className="drawer-header rl-pl-header">
+              <input
+                type="text" className="rl-pl-name-input"
+                value={editingPlaylist.name}
+                onChange={(e) => setEditingPlaylist({ ...editingPlaylist, name: e.target.value })}
+                onBlur={(e) => renamePlaylist(e.target.value.trim() || editingPlaylist.name)}
+                aria-label={t("radioLibrary.playlistNameLabel")}
+              />
               <button className="close-btn" onClick={() => setEditingPlaylist(null)}><Icon name="close" size={20} /></button>
             </div>
-            <div className="drawer-body">
-              <div className="form-group"><label className="form-label">{t("radioLibrary.playlistNameLabel")}</label>
-                <input type="text" className="form-control" value={editingPlaylist.name}
-                  onChange={(e) => setEditingPlaylist({ ...editingPlaylist, name: e.target.value })}
-                  onBlur={() => savePlaylist(editingPlaylist.id, editingPlaylist.name, editingPlaylist.items.map((i) => i.track.id))} /></div>
 
-              <button type="button" className={`btn ${editingPlaylist.is_default ? "btn-primary" : "btn-secondary"}`} style={{ marginBottom: "8px" }} onClick={toggleDefault}>
-                <Icon name="star" size={16} filled={editingPlaylist.is_default} />
-                {editingPlaylist.is_default ? t("radioLibrary.unsetDefault") : t("radioLibrary.setDefault")}
+            <div className="rl-pl-meta">
+              <span>{t("radioLibrary.itemsInPlaylist", { count: editingPlaylist.items.length })}</span>
+              <span className="rl-pl-meta-dot">·</span>
+              <span>{formatDuration(editingPlaylist.total_duration_seconds)}</span>
+              <div className="rl-toolbar-spacer" />
+              <button type="button" className={`rl-pl-star ${editingPlaylist.is_default ? "on" : ""}`} onClick={toggleDefault} title={editingPlaylist.is_default ? t("radioLibrary.unsetDefault") : t("radioLibrary.setDefault")}>
+                <Icon name="star" size={18} filled={editingPlaylist.is_default} />
               </button>
-              <p style={{ fontSize: "13px", opacity: 0.65, lineHeight: 1.4, margin: "0 0 16px" }}>
-                {t("radioLibrary.defaultHint")}
-              </p>
+              <button type="button" className="rl-pl-star" onClick={() => setPlaylistToDelete({ id: editingPlaylist.id, name: editingPlaylist.name, is_default: editingPlaylist.is_default, item_count: editingPlaylist.items.length, total_duration_seconds: editingPlaylist.total_duration_seconds, cover_track_id: null })} title={t("radioLibrary.deletePlaylist")}>
+                <Icon name="delete" size={18} />
+              </button>
+            </div>
 
-              <h4 className="rl-drawer-subhead">
-                {t("radioLibrary.itemsInPlaylist", { count: editingPlaylist.items.length })}
-                {editingPlaylist.items.length > 1 && <span className="rl-dnd-hint"> · {t("radioLibrary.dragHint")}</span>}
-              </h4>
-              {editingPlaylist.items.length === 0 ? (
-                <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>{t("radioLibrary.emptyPlaylist")}</p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "16px" }}>
-                  {editingPlaylist.items.map((item, index) => (
-                    <div key={item.id}
-                      className={`rl-pl-item ${dragOverIndex === index ? "drag-over" : ""}`}
-                      draggable
-                      onDragStart={() => { dragIndexRef.current = index; }}
-                      onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
-                      onDragLeave={() => setDragOverIndex((cur) => (cur === index ? null : cur))}
-                      onDrop={(e) => { e.preventDefault(); handleItemDrop(index); }}
-                      onDragEnd={() => { dragIndexRef.current = null; setDragOverIndex(null); }}
-                    >
-                      <Icon name="drag_indicator" size={16} className="rl-drag-handle" />
-                      <span style={{ color: "var(--text-dim)", fontSize: "0.8rem", width: "20px" }}>{index + 1}</span>
-                      <span style={{ flex: 1, fontSize: "0.9rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {item.track.title}<span style={{ color: "var(--text-muted)" }}> — {item.track.artist || t("radioLibrary.unknownArtist")}</span>
-                      </span>
-                      <button type="button" className="btn btn-danger" title={t("radioLibrary.remove")} onClick={() => removeFromPlaylist(item.track.id)}><Icon name="close" size={14} /></button>
-                    </div>
-                  ))}
-                </div>
+            {/* Recherche épinglée : ajouter un morceau ne fait plus défiler ni
+                refermer quoi que ce soit, une seule liste défile en dessous. */}
+            <div className="rl-pl-search-bar">
+              <Icon name="search" size={18} style={{ opacity: 0.5 }} />
+              <input
+                type="text" className="rl-pl-search-input"
+                placeholder={t("radioLibrary.addTracksSearch")}
+                value={addTrackSearch}
+                onChange={(e) => setAddTrackSearch(e.target.value)}
+              />
+              {addTrackSearch && (
+                <button type="button" className="rl-pl-search-clear" onClick={() => setAddTrackSearch("")}><Icon name="close" size={16} /></button>
               )}
+            </div>
 
-              <h4 className="rl-drawer-subhead" style={{ marginTop: "16px" }}>{t("radioLibrary.addTracksTitle")}</h4>
-              <input type="text" className="form-control" placeholder={t("radioLibrary.addTracksSearch")} value={addTrackSearch} onChange={(e) => setAddTrackSearch(e.target.value)} style={{ marginBottom: "8px" }} />
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxHeight: "280px", overflowY: "auto" }}>
-                {addableTracks.map((tr) => {
+            <div className="rl-pl-list">
+              {addTrackSearch.trim() ? (
+                // Mode recherche : toute la bibliothèque, ajout/retrait en un clic.
+                addableTracks.length === 0 ? (
+                  <p className="rl-empty-note" style={{ padding: "16px" }}>{t("radioLibrary.noResults")}</p>
+                ) : addableTracks.map((tr) => {
                   const already = editingPlaylist.items.some((i) => i.track.id === tr.id);
+                  const isBusy = addingTrackId === tr.id;
                   return (
-                    <div key={tr.id} className="rl-add-row">
-                      <span style={{ flex: 1, fontSize: "0.9rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {tr.title}<span style={{ color: "var(--text-muted)" }}> — {tr.artist || t("radioLibrary.unknownArtist")}</span>
-                      </span>
-                      <button type="button" className="btn btn-secondary" disabled={already} onClick={() => addToPlaylist(tr.id)}>
-                        <Icon name={already ? "check" : "add"} size={14} /> {already ? t("radioLibrary.added") : t("radioLibrary.add")}
+                    <div key={tr.id} className="rl-pl-row">
+                      <div className="rl-pl-row-thumb">
+                        {tr.has_cover ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- pochette servie par l'API
+                          <img src={trackCoverUrl(tr.id)} alt="" />
+                        ) : <Icon name="music_note" size={18} style={{ opacity: 0.3 }} />}
+                      </div>
+                      <div className="rl-pl-row-text">
+                        <span className="rl-pl-row-title">{tr.title}</span>
+                        <span className="rl-pl-row-artist">{tr.artist || t("radioLibrary.unknownArtist")}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className={`rl-pl-row-action ${already ? "on" : ""}`}
+                        disabled={isBusy}
+                        onClick={() => (already ? removeFromPlaylist(tr.id) : addToPlaylist(tr.id))}
+                        title={already ? t("radioLibrary.remove") : t("radioLibrary.add")}
+                      >
+                        <Icon name={already ? "check_circle" : "add_circle"} size={26} filled={already} />
                       </button>
                     </div>
                   );
-                })}
-              </div>
-
-              <div className="drawer-actions" style={{ marginTop: "16px" }}>
-                <button type="button" className="btn btn-danger" style={{ width: "100%", height: "48px" }}
-                  onClick={() => setPlaylistToDelete({ id: editingPlaylist.id, name: editingPlaylist.name, is_default: editingPlaylist.is_default, item_count: editingPlaylist.items.length, total_duration_seconds: editingPlaylist.total_duration_seconds, cover_track_id: null })}>
-                  <Icon name="delete" size={16} /> {t("radioLibrary.deletePlaylist")}
-                </button>
-              </div>
+                })
+              ) : editingPlaylist.items.length === 0 ? (
+                <div className="rl-empty-state" style={{ padding: "32px 16px" }}>
+                  <Icon name="queue_music" size={36} style={{ opacity: 0.25, marginBottom: "8px" }} />
+                  <p style={{ margin: 0 }}>{t("radioLibrary.emptyPlaylist")}</p>
+                </div>
+              ) : (
+                // Mode aperçu : morceaux déjà dans la playlist, réordonnables.
+                editingPlaylist.items.map((item, index) => (
+                  <div key={item.id}
+                    className={`rl-pl-row ${dragOverIndex === index ? "drag-over" : ""}`}
+                    draggable
+                    onDragStart={() => { dragIndexRef.current = index; }}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
+                    onDragLeave={() => setDragOverIndex((cur) => (cur === index ? null : cur))}
+                    onDrop={(e) => { e.preventDefault(); handleItemDrop(index); }}
+                    onDragEnd={() => { dragIndexRef.current = null; setDragOverIndex(null); }}
+                  >
+                    <Icon name="drag_indicator" size={18} className="rl-drag-handle" />
+                    <div className="rl-pl-row-thumb">
+                      {item.track.has_cover ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- pochette servie par l'API
+                        <img src={trackCoverUrl(item.track.id)} alt="" />
+                      ) : <Icon name="music_note" size={18} style={{ opacity: 0.3 }} />}
+                    </div>
+                    <div className="rl-pl-row-text">
+                      <span className="rl-pl-row-title">{item.track.title}</span>
+                      <span className="rl-pl-row-artist">{item.track.artist || t("radioLibrary.unknownArtist")}</span>
+                    </div>
+                    <span className="rl-pl-row-duration">{formatDuration(item.track.duration_seconds)}</span>
+                    <button type="button" className="rl-pl-row-action" title={t("radioLibrary.remove")} onClick={() => removeFromPlaylist(item.track.id)}>
+                      <Icon name="close" size={18} />
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </>
