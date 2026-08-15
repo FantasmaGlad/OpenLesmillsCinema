@@ -37,7 +37,7 @@ Bobine is program-agnostic: class categories are free-form, so it fits any catal
 
 Full walkthrough — studio admin, scheduling, member kiosk, mobile remote and radio — in the [2.0 release notes](https://github.com/FantasmaGlad/Bobine/releases/latest).
 
-https://github.com/user-attachments/assets/dfde9250-3016-43cc-af2d-5853f726ffe1
+https://github.com/user-attachments/assets/e33196d8-cfd7-449e-ad7f-0929a0361d10
 
 ---
 
