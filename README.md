@@ -1,10 +1,10 @@
 # Bobine
 
-**Self-hosted, offline-first digital signage and scheduled video player for group-fitness studios and gyms.**
+**The open-source, self-hosted alternative to LesMills Cinema — offline-first digital signage and scheduled video player for group-fitness studios and gyms.**
 
-Bobine turns a low-cost dedicated mini PC into a complete in-club video system: it schedules and plays pre-recorded group-fitness class videos on your screens, lets members browse and start a class on demand from a kiosk, drives a wired and a networked display independently, runs a coach audio mode with animated backgrounds, and streams 24/7 background music. Everything runs locally on your own hardware. No cloud, no subscription, no internet required after setup.
+Bobine turns a low-cost dedicated mini PC into a complete in-club video system: it schedules and plays pre-recorded group-fitness class videos on your screens, lets members browse and start a class on demand from a kiosk, drives a wired and a networked display independently, runs a coach audio mode with animated backgrounds, and streams 24/7 background music. Everything runs locally on your own hardware. No cloud, no subscription, no vendor lock-in, no internet required after setup.
 
-[Français](README.fr.md) · [Technical documentation](docs/ARCHITECTURE.md)
+[Français](README.fr.md) · [Technical documentation](docs/ARCHITECTURE.md) · [Latest release](https://github.com/FantasmaGlad/Bobine/releases/latest)
 
 [![CI](https://github.com/FantasmaGlad/Bobine/actions/workflows/ci.yml/badge.svg)](https://github.com/FantasmaGlad/Bobine/actions/workflows/ci.yml)
 ![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue)
@@ -13,22 +13,31 @@ Bobine turns a low-cost dedicated mini PC into a complete in-club video system: 
 ![Platform: Debian 13](https://img.shields.io/badge/Platform-Debian%2013-A81D33)
 ![Self-hosted](https://img.shields.io/badge/Self--hosted-Local--first-4c1)
 
-**Keywords:** self-hosted digital signage, group fitness, gym class scheduling, on-demand fitness video player, exercise class kiosk, boutique studio, indoor cycling, thin client, mini PC, offline, local-first, FastAPI, Next.js, Debian.
+**Keywords:** open-source LesMills Cinema alternative, self-hosted digital signage, group fitness class scheduling software, on-demand fitness video player, gym exercise class kiosk, boutique studio virtual classes, indoor cycling studio software, thin client, mini PC, offline video signage, local-first, FastAPI, Next.js, Debian.
 
 ---
 
 ## Why Bobine
 
-Group-fitness rooms increasingly run pre-recorded, instructor-led video classes ("virtual classes") on a big screen. Off-the-shelf solutions are cloud-locked, subscription-based, and stop working when the internet drops. Bobine is the opposite:
+Group-fitness rooms increasingly run pre-recorded, instructor-led video classes ("virtual classes") on a big screen. Proprietary solutions like LesMills Cinema lock you into a closed platform, a recurring subscription, and a vendor you depend on for every update — and they stop working when the internet drops. Bobine delivers the same in-club experience — scheduled classes, an on-demand kiosk, a polished member experience — while keeping you in full control:
 
 - **You own it.** Your videos, your hardware, your schedule. No monthly fee, no vendor lock-in, no account.
 - **It works offline.** Once installed, the club needs no internet connection to run classes.
-- **It runs on cheap hardware.** A second-hand thin client or mini PC (Dell Wyse 5070 class) is enough.
+- **The source is open.** AGPL-3.0-licensed and auditable — the system's future doesn't depend on a vendor's business decisions.
+- **It runs on cheap hardware.** A second-hand thin client or mini PC (Dell Wyse 5070 class) is enough — no recurring licence fee per screen.
 - **It is unattended.** Auto-starts on power-up, recovers from power loss, and restarts a failed component on its own.
 
-Typical users: boutique studios, gyms, hotel and corporate fitness rooms, physiotherapy and rehab spaces, dance and cycling studios — anyone who plays scheduled or on-demand fitness videos on a screen.
+Typical users: boutique studios, gyms, hotel and corporate fitness rooms, physiotherapy and rehab spaces, dance and cycling studios — anyone who plays scheduled or on-demand fitness videos on a screen, and anyone looking for a LesMills Cinema alternative without the subscription.
 
 Bobine is program-agnostic: class categories are free-form, so it fits any catalogue of group-fitness, cycling, strength, mobility or wellbeing classes.
+
+---
+
+## See it in action
+
+Full walkthrough — studio admin, scheduling, member kiosk, mobile remote and radio — in the [2.0 release notes](https://github.com/FantasmaGlad/Bobine/releases/latest).
+
+https://github.com/user-attachments/assets/dfde9250-3016-43cc-af2d-5853f726ffe1
 
 ---
 
@@ -150,14 +159,6 @@ sudo ./install.sh --uninstall --purge
 ```
 
 Add `--purge-data` to also remove imported media (irreversible). Shared system packages are kept. See `sudo ./install.sh --help` for all options.
-
----
-
-## Documentation
-
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — technical reference: architecture, data model, network contract, API and WebSocket reference, systemd services, remote operation.
-- **[docs/cahier-des-charges-radio.md](docs/cahier-des-charges-radio.md)** — full specification of the radio subsystem (French).
-- **[docs/cahier-des-charges-installeur.md](docs/cahier-des-charges-installeur.md)** — specification of the graphical installer assistant and the CLI foundations already in place (French). Assistant core (Rust): [`assistant/`](assistant/).
 
 ---
 

@@ -1,10 +1,10 @@
 # Bobine
 
-**Affichage dynamique auto-hébergé et lecteur vidéo planifié, hors ligne, pour salles de fitness et cours collectifs.**
+**L'alternative open source et auto-hébergée à LesMills Cinema — affichage dynamique et lecteur vidéo planifié, hors ligne, pour salles de fitness et cours collectifs.**
 
-Bobine transforme un mini PC dédié bon marché en système vidéo complet pour votre salle : il planifie et diffuse des vidéos de cours collectifs pré-enregistrées sur vos écrans, permet aux adhérents de parcourir et lancer un cours à la demande depuis une borne, pilote un écran câblé et un écran réseau indépendamment, propose un mode coach audio avec fonds animés, et diffuse une musique d'ambiance 24/7. Tout tourne en local, sur votre matériel. Sans cloud, sans abonnement, sans connexion internet après l'installation.
+Bobine transforme un mini PC dédié bon marché en système vidéo complet pour votre salle : il planifie et diffuse des vidéos de cours collectifs pré-enregistrées sur vos écrans, permet aux adhérents de parcourir et lancer un cours à la demande depuis une borne, pilote un écran câblé et un écran réseau indépendamment, propose un mode coach audio avec fonds animés, et diffuse une musique d'ambiance 24/7. Tout tourne en local, sur votre matériel. Sans cloud, sans abonnement, sans dépendance à un éditeur, sans connexion internet après l'installation.
 
-[English](README.md) · [Documentation technique](docs/ARCHITECTURE.md)
+[English](README.md) · [Documentation technique](docs/ARCHITECTURE.md) · [Dernière version](https://github.com/FantasmaGlad/Bobine/releases/latest)
 
 [![CI](https://github.com/FantasmaGlad/Bobine/actions/workflows/ci.yml/badge.svg)](https://github.com/FantasmaGlad/Bobine/actions/workflows/ci.yml)
 ![Licence : AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue)
@@ -13,22 +13,31 @@ Bobine transforme un mini PC dédié bon marché en système vidéo complet pour
 ![Plateforme : Debian 13](https://img.shields.io/badge/Platform-Debian%2013-A81D33)
 ![Auto-hébergé](https://img.shields.io/badge/Auto--h%C3%A9berg%C3%A9-Local--first-4c1)
 
-**Mots-clés :** affichage dynamique auto-hébergé, signalétique numérique, cours collectifs, salle de sport, planification vidéo, lecteur vidéo fitness à la demande, borne de cours, studio, cycling indoor, thin client, mini PC, hors ligne, local-first, FastAPI, Next.js, Debian.
+**Mots-clés :** alternative open source à LesMills Cinema, affichage dynamique auto-hébergé, logiciel de planification de cours collectifs, lecteur vidéo fitness à la demande, borne de cours virtuels, studio de cycling indoor, salle de sport, thin client, mini PC, signalétique hors ligne, local-first, FastAPI, Next.js, Debian.
 
 ---
 
 ## Pourquoi Bobine
 
-Les salles de cours collectifs diffusent de plus en plus des cours vidéo pré-enregistrés, animés par un coach à l'écran (« cours virtuels »). Les solutions du marché sont verrouillées dans le cloud, payantes à l'abonnement, et s'arrêtent dès que la connexion tombe. Bobine fait l'inverse :
+Les salles de cours collectifs diffusent de plus en plus des cours vidéo pré-enregistrés, animés par un coach à l'écran (« cours virtuels »). Les solutions propriétaires comme LesMills Cinema enferment dans une plateforme fermée, un abonnement récurrent et une dépendance à un éditeur pour chaque mise à jour — et s'arrêtent dès que la connexion tombe. Bobine offre la même expérience en salle — cours planifiés, borne à la demande, expérience adhérent soignée — en gardant le contrôle total :
 
 - **Vous êtes propriétaire.** Vos vidéos, votre matériel, votre planning. Pas d'abonnement, pas de dépendance à un éditeur, pas de compte.
 - **Ça marche hors ligne.** Une fois installé, la salle n'a besoin d'aucune connexion internet pour diffuser les cours.
-- **Ça tourne sur du matériel bon marché.** Un thin client ou un mini PC d'occasion (type Dell Wyse 5070) suffit.
+- **Le code est ouvert.** Licence AGPL-3.0, auditable — l'avenir du système ne dépend pas des décisions commerciales d'un éditeur tiers.
+- **Ça tourne sur du matériel bon marché.** Un thin client ou un mini PC d'occasion (type Dell Wyse 5070) suffit — aucune licence récurrente par écran.
 - **C'est autonome.** Démarrage automatique à la mise sous tension, reprise après coupure de courant, redémarrage automatique d'un composant en panne.
 
-Utilisateurs types : studios, salles de sport, espaces fitness d'hôtels et d'entreprises, kinés et centres de rééducation, studios de danse et de cycling — quiconque diffuse des vidéos de cours planifiées ou à la demande sur un écran.
+Utilisateurs types : studios, salles de sport, espaces fitness d'hôtels et d'entreprises, kinés et centres de rééducation, studios de danse et de cycling — quiconque diffuse des vidéos de cours planifiées ou à la demande sur un écran, et cherche une alternative à LesMills Cinema sans abonnement.
 
 Bobine est agnostique aux programmes : les catégories de cours sont libres, il s'adapte donc à n'importe quel catalogue de cours collectifs, cycling, renforcement, mobilité ou bien-être.
+
+---
+
+## En images
+
+Démonstration complète — admin studio, planning, borne adhérent, télécommande mobile et radio — dans les [notes de version 2.0](https://github.com/FantasmaGlad/Bobine/releases/latest).
+
+https://github.com/user-attachments/assets/dfde9250-3016-43cc-af2d-5853f726ffe1
 
 ---
 
@@ -150,14 +159,6 @@ sudo ./install.sh --uninstall --purge
 ```
 
 Ajoutez `--purge-data` pour retirer aussi les médias importés (irréversible). Les paquets système partagés sont conservés. Voir `sudo ./install.sh --help` pour toutes les options.
-
----
-
-## Documentation
-
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — référence technique : architecture, modèle de données, contrat réseau, référence API et WebSocket, services systemd, exploitation à distance.
-- **[docs/cahier-des-charges-radio.md](docs/cahier-des-charges-radio.md)** — spécification complète du sous-système radio.
-- **[docs/cahier-des-charges-installeur.md](docs/cahier-des-charges-installeur.md)** — spécification de l'assistant d'installation graphique et fondations CLI déjà en place. Cœur de l'assistant (Rust) : [`assistant/`](assistant/).
 
 ---
 
