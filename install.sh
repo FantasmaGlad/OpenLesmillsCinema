@@ -911,41 +911,61 @@ done
 # Démute explicite : bobine-audio-guard.service coupe
 # Master/Speaker par défaut hors session kiosk, c'est ici qu'on les rouvre
 # une fois prêt.
-amixer -c0 sset 'Auto-Mute Mode' 'Line Out+Speaker' >/dev/null 2>&1 || true
-# Volume explicite plutôt qu'un simple "unmute" (le cycle mute/unmute pouvait
-# laisser le volume matériel à 0% tout en étant démuté — son coupé de façon
-# non-évidente). 100% (0dB, niveau ligne de référence) sur TOUS les chemins
-# de sortie : le Wyse alimente une table de mixage, c'est ELLE qui atténue —
-# un niveau source réduit obligeait à pousser le gain de la table au maximum,
-# ce qui est pire (bruit de fond amplifié, aucune marge). Le réglage de
-# volume "utilisateur" reste disponible via les boutons de l'interface
-# (volume logiciel appliqué au flux par le kiosk), indépendant de ces
-# niveaux matériels de référence.
-amixer -c0 sset 'Master' 100% unmute >/dev/null 2>&1 || true
-amixer -c0 sset 'Speaker' 100% unmute >/dev/null 2>&1 || true
-# Chemin casque/ligne (prise avant, "sortie extérieur") : géré séparément du
-# haut-parleur — l'auto-port bascule dessus quand CETTE prise est branchée.
-amixer -c0 sset 'Headphone+LO' 100% >/dev/null 2>&1 || true
-amixer -c0 sset 'Headphone' unmute >/dev/null 2>&1 || true
-# Volume logiciel PipeWire aussi à 100% : c'est le canal que pilotent les
-# boutons de volume de l'interface — un plafond logiciel bas ici aurait le
-# même défaut que le plafond matériel corrigé ci-dessus.
-pactl set-sink-volume @DEFAULT_SINK@ 100% >/dev/null 2>&1 || true
-# Chemin micro fermé (réf. "bruit strident continu même pendant la lecture") :
-# la prise avant est une prise combo casque/micro (TRRS) — le codec y
-# détectait un "Headset Mic" fantôme et polarisait le contact micro avec
-# Capture ET Headset Mic Boost à fond (+60dB cumulés). Un câble stéréo TRS
-# classique branché là court-circuite ce contact polarisé vers la masse
-# audio -> bruit électrique continu injecté dans l'ampli. Aucun micro n'est
-# utilisé sur ce déploiement : gains à zéro, capture coupée, et source
-# d'entrée déplacée sur le micro ARRIÈRE (rien d'y branché) pour éloigner la
-# polarisation du jack avant utilisé en sortie.
-amixer -c0 sset 'Capture' 0% nocap >/dev/null 2>&1 || true
-amixer -c0 sset 'Capture',1 0% nocap >/dev/null 2>&1 || true
-amixer -c0 sset 'Headset Mic Boost' 0 >/dev/null 2>&1 || true
-amixer -c0 sset 'Rear Mic Boost' 0 >/dev/null 2>&1 || true
-amixer -c0 cset name='Input Source' 'Rear Mic' >/dev/null 2>&1 || true
-amixer -c0 cset name='Input Source',index=1 'Rear Mic' >/dev/null 2>&1 || true
+#
+# Dynamique et non figée sur "carte 0" : la sortie câblée peut être une carte
+# différente selon le boîtier (Wyse, mini-PC...), et un même codec expose
+# souvent plusieurs sorties analogiques simultanées (Speaker = interne/arrière,
+# Headphone/Headphone+LO = prise avant, Front/Surround = autres canaux) qui
+# partagent le même flux PCM plutôt que de s'exclure — sauf que le registre
+# 'Auto-Mute Mode' du codec, LUI, coupe automatiquement les autres sorties dès
+# qu'un jack est détecté branché (cause du bug "une seule prise fonctionne").
+# On le désactive donc explicitement, puis on démute/monte à 100% CHAQUE
+# contrôle de lecture découvert sur CHAQUE carte, plutôt qu'une liste figée de
+# noms — pour que toutes les prises câblées restent actives en même temps,
+# quel que soit le matériel.
+for BOBINE_CARD in $(awk -F'[][]' '/^ *[0-9]+ \[/{print $2}' /proc/asound/cards 2>/dev/null | sed 's/[[:space:]]*$//'); do
+    amixer -c "${BOBINE_CARD}" sset 'Auto-Mute Mode' 'Disabled' >/dev/null 2>&1 || true
+    # Volume explicite plutôt qu'un simple "unmute" (le cycle mute/unmute
+    # pouvait laisser le volume matériel à 0% tout en étant démuté — son coupé
+    # de façon non-évidente). 100% (0dB, niveau ligne de référence) sur TOUS
+    # les chemins de sortie : le Wyse alimente une table de mixage, c'est ELLE
+    # qui atténue — un niveau source réduit obligeait à pousser le gain de la
+    # table au maximum, ce qui est pire (bruit de fond amplifié, aucune
+    # marge). Le réglage de volume "utilisateur" reste disponible via les
+    # boutons de l'interface (volume logiciel appliqué au flux par le kiosk),
+    # indépendant de ces niveaux matériels de référence.
+    amixer -c "${BOBINE_CARD}" scontrols 2>/dev/null | sed -n "s/^Simple mixer control '\([^']*\)'.*/\1/p" | sort -u | while IFS= read -r BOBINE_CTRL; do
+        case "${BOBINE_CTRL}" in
+            *[Mm]ic*|*Boost|Capture|"Input Source"|"Auto-Mute Mode") continue ;;
+        esac
+        amixer -c "${BOBINE_CARD}" sset "${BOBINE_CTRL}" 100% unmute >/dev/null 2>&1 || true
+    done
+    # Chemin micro fermé (réf. "bruit strident continu même pendant la
+    # lecture") : la prise avant est une prise combo casque/micro (TRRS) — le
+    # codec y détectait un "Headset Mic" fantôme et polarisait le contact
+    # micro avec Capture ET Headset Mic Boost à fond (+60dB cumulés). Un câble
+    # stéréo TRS classique branché là court-circuite ce contact polarisé vers
+    # la masse audio -> bruit électrique continu injecté dans l'ampli. Aucun
+    # micro n'est utilisé sur ce déploiement : gains à zéro, capture coupée,
+    # et source d'entrée déplacée sur le micro ARRIÈRE (rien d'y branché) pour
+    # éloigner la polarisation du jack avant utilisé en sortie. Contrôles
+    # optionnels selon le codec (mini-PC sans prise micro dédiée) : chacun est
+    # tenté isolément, sans erreur si absent.
+    amixer -c "${BOBINE_CARD}" sset 'Capture' 0% nocap >/dev/null 2>&1 || true
+    amixer -c "${BOBINE_CARD}" sset 'Capture',1 0% nocap >/dev/null 2>&1 || true
+    amixer -c "${BOBINE_CARD}" sset 'Headset Mic Boost' 0 >/dev/null 2>&1 || true
+    amixer -c "${BOBINE_CARD}" sset 'Rear Mic Boost' 0 >/dev/null 2>&1 || true
+    amixer -c "${BOBINE_CARD}" cset name='Input Source' 'Rear Mic' >/dev/null 2>&1 || true
+    amixer -c "${BOBINE_CARD}" cset name='Input Source',index=1 'Rear Mic' >/dev/null 2>&1 || true
+done
+# Volume logiciel PipeWire aussi à 100% sur TOUS les sinks (pas seulement le
+# sink par défaut) : c'est le canal que pilotent les boutons de volume de
+# l'interface — un plafond logiciel bas ici aurait le même défaut que le
+# plafond matériel corrigé ci-dessus, et un boîtier avec plusieurs cartes son
+# expose potentiellement plusieurs sinks WirePlumber.
+pactl list short sinks 2>/dev/null | cut -f1 | while IFS= read -r BOBINE_SINK; do
+    pactl set-sink-volume "${BOBINE_SINK}" 100% >/dev/null 2>&1 || true
+done
 
 # Profil Chromium dédié et jetable, purgé à chaque lancement du kiosk :
 # supprime toutes les données temporaires de chargement (cache d'une ancienne
@@ -1070,9 +1090,29 @@ EOF
     # une fois le backend joignable) ni 'alsactl store' seul ne couvrent la
     # fenêtre AVANT que le kiosk démarre ni celle APRÈS son arrêt
     # (redémarrage/extinction) — exactement la fenêtre où une sortie DAC non
-    # pilotée peut hurler. Ce service coupe Master + Speaker au tout début du
-    # boot (bien avant le kiosk) et les recoupe explicitement à l'arrêt ;
-    # kiosk-xinitrc les rouvre une fois réellement prêt à jouer du son.
+    # pilotée peut hurler. Ce service coupe TOUTES les sorties de lecture
+    # découvertes, sur TOUTES les cartes ALSA (script dédié, pas une liste de
+    # noms figée sur "carte 0" — même logique dynamique que kiosk-xinitrc, qui
+    # gère plusieurs sorties câblées simultanées) au tout début du boot (bien
+    # avant le kiosk) et les recoupe explicitement à l'arrêt ; kiosk-xinitrc
+    # les rouvre une fois réellement prêt à jouer du son.
+    write_file /usr/local/bin/bobine-audio-mute.sh <<'EOF'
+#!/bin/sh
+CARDS=$(awk -F'[][]' '/^ *[0-9]+ \[/{print $2}' /proc/asound/cards 2>/dev/null | sed 's/[[:space:]]*$//')
+# Carte pas encore énumérée par le noyau au tout début du boot (cf.
+# Restart=on-failure du service appelant) : on échoue explicitement pour
+# déclencher une nouvelle tentative plutôt que de "réussir" sans rien couper.
+[ -z "${CARDS}" ] && exit 1
+for CARD in ${CARDS}; do
+    amixer -c "${CARD}" scontrols 2>/dev/null | sed -n "s/^Simple mixer control '\([^']*\)'.*/\1/p" | sort -u | while IFS= read -r CTRL; do
+        case "${CTRL}" in
+            *[Mm]ic*|*Boost|Capture|"Input Source"|"Auto-Mute Mode") continue ;;
+        esac
+        amixer -c "${CARD}" -q sset "${CTRL}" mute 2>/dev/null || true
+    done
+done
+EOF
+    run chmod +x /usr/local/bin/bobine-audio-mute.sh
     write_file /etc/systemd/system/bobine-audio-guard.service <<'EOF'
 [Unit]
 Description=Bobine - Coupe le son hors session kiosk
@@ -1092,12 +1132,8 @@ RemainAfterExit=yes
 # ordonnancement exact, la carte apparaît toujours en quelques secondes.
 Restart=on-failure
 RestartSec=1
-ExecStart=/usr/bin/amixer -c0 -q sset Master mute
-ExecStart=/usr/bin/amixer -c0 -q sset Speaker mute
-ExecStart=/usr/bin/amixer -c0 -q sset Headphone mute
-ExecStop=/usr/bin/amixer -c0 -q sset Master mute
-ExecStop=/usr/bin/amixer -c0 -q sset Speaker mute
-ExecStop=/usr/bin/amixer -c0 -q sset Headphone mute
+ExecStart=/usr/local/bin/bobine-audio-mute.sh
+ExecStop=/usr/local/bin/bobine-audio-mute.sh
 
 [Install]
 WantedBy=multi-user.target
