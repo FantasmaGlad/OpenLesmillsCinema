@@ -72,8 +72,11 @@ For the full architecture, data model, network contract and API reference, see *
 
 ## Hardware requirements
 
-- A **mini PC or x86-64 thin client** (reference target: Dell Wyse 5070 Intel Gemini Lake, or any Intel / AMD Ryzen mini PC). Any Debian-compatible PC with an Intel iGPU (QuickSync / iHD driver) or AMD APU/GPU (Radeon / mesa-va-drivers) works; VA-API hardware video decoding is automatically detected and configured.
-- **4 GB of RAM** minimum, a few GB of disk for the system plus space for your video library.
+- A **mini PC or x86-64 thin client**:
+  - **Recommended Intel models**: Dell Wyse 5070 (Intel Celeron J4105 ~$40-50 refurbished), HP ProDesk 400/600 G4/G5 DM, Lenovo ThinkCentre M710q/M720q Tiny, Beelink Mini S12/EQ12 (N100/N5105).
+  - **Recommended AMD models**: HP EliteDesk 705 G4/G5 Mini (AMD Ryzen 3/5 Pro ~$60-80 refurbished), Lenovo ThinkCentre M715q/M725q Tiny, HP T630/T730/T740 Thin Client.
+  - Any Debian-compatible x86-64 PC with an Intel iGPU (`iHD`/QuickSync driver) or AMD APU/GPU (`mesa-va-drivers`/Radeon) works; VA-API hardware video decoding is automatically detected and configured.
+- **4 GB of RAM** minimum (8 GB recommended), SSD from 64 GB to 256 GB depending on your video library size.
 - **One or two screens** (HDMI for the wired output; the networked screen is any device with a browser).
 - A **local Wi-Fi network** (a router or access point) to reach the other devices — the networked second screen, the mobile remote and the radio player all connect over the local network. It needs **no internet** and keeps working even if your internet connection drops: the LAN alone is enough. Bobine can also run **fully offline with no network at all**, but then only the single wired (HDMI) screen is used.
 

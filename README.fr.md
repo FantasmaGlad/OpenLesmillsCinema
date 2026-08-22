@@ -72,8 +72,11 @@ Pour l'architecture complète, le modèle de données, le contrat réseau et la 
 
 ## Matériel requis
 
-- Un **mini PC ou thin client x86-64** (cible de référence : Dell Wyse 5070 Intel Gemini Lake, ou tout mini PC Intel / AMD Ryzen). Tout petit PC compatible Debian avec un iGPU Intel (QuickSync / pilote iHD) ou un APU/GPU AMD (Radeon / pilote mesa-va-drivers) convient ; le décodage vidéo matériel VA-API est automatiquement détecté et configuré.
-- **4 Go de RAM** minimum, quelques Go de disque pour l'application plus l'espace de votre bibliothèque vidéo.
+- Un **mini PC ou thin client x86-64** :
+  - **Modèles Intel recommandés** : Dell Wyse 5070 (Intel Celeron J4105 ~40-50 € reconditionné), HP ProDesk 400/600 G4/G5 DM, Lenovo ThinkCentre M710q/M720q Tiny, Beelink Mini S12/EQ12 (N100/N5105).
+  - **Modèles AMD recommandés** : HP EliteDesk 705 G4/G5 Mini (AMD Ryzen 3/5 Pro ~60-80 € reconditionné), Lenovo ThinkCentre M715q/M725q Tiny, HP T630/T730/T740 Thin Client.
+  - Tout PC x86-64 compatible Debian avec un iGPU Intel (pilote `iHD`/QuickSync) ou un APU/GPU AMD (pilote `mesa-va-drivers`/Radeon) convient ; le décodage vidéo matériel VA-API est automatiquement détecté et configuré.
+- **4 Go de RAM** minimum (8 Go recommandés), SSD de 64 Go à 256 Go selon la taille de votre bibliothèque vidéo.
 - **Un ou deux écrans** (HDMI pour la sortie câblée ; l'écran réseau est n'importe quel appareil avec un navigateur).
 - Un **réseau local Wi-Fi** (un routeur ou point d'accès) pour joindre les autres appareils — le second écran réseau, la télécommande mobile et le lecteur radio se connectent tous sur le réseau local. Il ne demande **aucune connexion internet** et continue de fonctionner même si votre accès internet tombe : le réseau local seul suffit. Bobine peut aussi tourner **totalement hors ligne, sans aucun réseau**, mais seul l'unique écran câblé (HDMI) est alors utilisé.
 
