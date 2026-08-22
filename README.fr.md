@@ -103,11 +103,26 @@ Vous avez maintenant une machine Debian 13 minimale, joignable sur votre réseau
 
 Sur le mini PC (en direct ou par SSH), avec votre compte normal (pas root) :
 
+**Option A — Commande rapide en 1 ligne (recommandée) :**
+
+```bash
+curl -sSL https://bobine.fit/install.sh | bash
+```
+
+**Option B — Clonage manuel :**
+
 ```bash
 git clone https://github.com/FantasmaGlad/Bobine.git
 cd Bobine
 sudo ./install.sh
 ```
+
+**Options d'affichage & contrôle :**
+- **Interface épurée (par défaut)** : progression claire et moderne, les logs détaillés sont stockés dans `/var/log/bobine/install-*.log`.
+- **Mode verbeux (`-v` ou `--verbose`)** : affiche tous les flux et logs de compilation en direct (`sudo ./install.sh -v` ou `curl -sSL https://bobine.fit/install.sh | bash -s -- -v`).
+- **Mode silencieux (`-q` ou `--quiet`)** : n'affiche que les erreurs et le bilan final.
+- **Mode serveur seul (`--no-kiosk`)** : installe uniquement le backend et l'API, sans stack graphique locale.
+- **Diagnostic de santé (`--check`)** : vérifie l'état de l'installation et des services sans rien modifier.
 
 `install.sh` est idempotent et autonome. Il installe les paquets système, Redis, Node.js et l'environnement Python, construit l'interface web, écrit la configuration, enregistre les services systemd (backend, kiosque, garde audio, chien de garde de santé), publie le nom `bobine.local` sur le réseau et démarre le tout. Relancez-le après une mise à jour pour reconstruire et redémarrer proprement.
 

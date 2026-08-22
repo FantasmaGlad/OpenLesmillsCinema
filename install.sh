@@ -50,6 +50,8 @@ ${BOLD}USAGE${RESET}
 ${BOLD}OPTIONS${RESET}
   -h, --help          Affiche cette aide et quitte
   -y, --yes           Ne demande aucune confirmation (mode non-interactif)
+  -v, --verbose       Mode verbeux : affiche l'intégralité des flux et logs de compilation en direct
+  -q, --quiet         Mode silencieux : n'affiche que les erreurs et le bilan final
       --dry-run       N'applique aucun changement : affiche ce qui serait fait
       --no-kiosk      Installation "serveur" : backend seul, sans Chromium/X11/audio
                         (pour un poste de dev ou un serveur distinct de l'écran câblé)
@@ -63,10 +65,10 @@ ${BOLD}OPTIONS${RESET}
       --uninstall     Arrête, désactive et retire tout ce que ce script a installé
       --purge         Avec --uninstall : retire aussi venv/, node_modules/, frontend/out/ et la config
       --purge-data    Avec --uninstall --purge : retire EN PLUS les médias importés (destructif, confirmation requise)
-  -v, --verbose       Affiche la sortie complète des commandes normalement silencieuses
 
 ${BOLD}EXEMPLES${RESET}
-  sudo ./${SCRIPT_NAME}                       Installation complète (Wyse/kiosk)
+  sudo ./${SCRIPT_NAME}                       Installation standard (interface épurée par défaut)
+  sudo ./${SCRIPT_NAME} -v                    Installation avec flux verbeux (logs détaillés en direct)
   sudo ./${SCRIPT_NAME} --no-kiosk            Backend seul, sur un serveur ou un poste de dev
   sudo ./${SCRIPT_NAME} --skip-packages       Réinstalle après un 'git pull' sans retoucher apt
   sudo ./${SCRIPT_NAME} --dry-run             Prévisualise toutes les actions sans rien changer
@@ -89,6 +91,7 @@ DO_UNINSTALL=false
 DO_PURGE=false
 DO_PURGE_DATA=false
 VERBOSE=false
+QUIET=false
 PROGRESS=""
 PROGRESS_JSON=false
 
@@ -108,6 +111,7 @@ while [[ $# -gt 0 ]]; do
         --purge) DO_PURGE=true ;;
         --purge-data) DO_PURGE_DATA=true ;;
         -v|--verbose) VERBOSE=true ;;
+        -q|--quiet) QUIET=true ;;
         *) echo "Option inconnue : $1" >&2; echo; usage; exit 1 ;;
     esac
     shift
@@ -122,8 +126,8 @@ case "${PROGRESS}" in
     *)      echo "Valeur --progress inconnue : ${PROGRESS} (attendu : json)" >&2; exit 1 ;;
 esac
 
-log()  { printf '\n%s%s▸%s %s\n' "$BOLD" "$CYAN" "$RESET" "$*"; }
-ok()   { printf '  %s %s\n' "$ICON_OK" "$*"; }
+log()  { $QUIET && return 0; printf '\n%s%s▸%s %s\n' "$BOLD" "$CYAN" "$RESET" "$*"; }
+ok()   { $QUIET && return 0; printf '  %s %s\n' "$ICON_OK" "$*"; }
 warn() { printf '  %s %s%s%s\n' "$ICON_WARN" "$YELLOW" "$*" "$RESET" >&2; }
 err()  { printf '  %s %s%s%s\n' "$ICON_FAIL" "$RED" "$*" "$RESET" >&2; }
 
@@ -134,14 +138,18 @@ confirm() {
     [[ "$reply" =~ ^[oOyY]$ ]]
 }
 
-# Exécute une commande "atomique" en respectant --dry-run (ne l'affiche qu'en
-# le préfixant, sans l'exécuter, plutôt que de dupliquer chaque action système
-# derrière un if/else répété à chaque appel).
+# Exécute une commande "atomique" en respectant --dry-run et la verbosité.
+# En mode épuré par défaut, la sortie est redirigée vers LOG_FILE.
+# En mode verbeux (-v/--verbose), la sortie est diffusée en direct à l'écran.
 run() {
     if $DRY_RUN; then
         printf '  %s[dry-run]%s %s\n' "$DIM" "$RESET" "$*"
-    else
+        return 0
+    fi
+    if $VERBOSE; then
         "$@"
+    else
+        "$@" >>"${LOG_FILE}" 2>&1
     fi
 }
 
@@ -168,18 +176,26 @@ append_file() {
 # Exécute une commande EN TANT QUE TARGET_USER. Préfère `sudo -u` (comportement
 # éprouvé du chemin classique) et retombe sur `runuser` (util-linux, toujours
 # présent) quand sudo est absent — indispensable au chemin --as-user (Debian
-# minimal sans sudo, lancé en root via 'su -'). Respecte --dry-run.
+# minimal sans sudo, lancé en root via 'su -'). Respecte --dry-run et la verbosité.
 run_user() {
     if $DRY_RUN; then
         printf '  %s[dry-run]%s (utilisateur %s) %s\n' "$DIM" "$RESET" "${TARGET_USER}" "$*"
         return 0
     fi
     if command -v sudo >/dev/null 2>&1; then
-        sudo -u "${TARGET_USER}" -- "$@"
+        if $VERBOSE; then
+            sudo -u "${TARGET_USER}" -- "$@"
+        else
+            sudo -u "${TARGET_USER}" -- "$@" >>"${LOG_FILE}" 2>&1
+        fi
     else
         local home
         home="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
-        runuser -u "${TARGET_USER}" -- env "HOME=${home:-/home/${TARGET_USER}}" "$@"
+        if $VERBOSE; then
+            runuser -u "${TARGET_USER}" -- env "HOME=${home:-/home/${TARGET_USER}}" "$@"
+        else
+            runuser -u "${TARGET_USER}" -- env "HOME=${home:-/home/${TARGET_USER}}" "$@" >>"${LOG_FILE}" 2>&1
+        fi
     fi
 }
 
@@ -191,9 +207,17 @@ apt_optional() {
         printf '  %s[dry-run]%s installerait (optionnel) %s\n' "$DIM" "$RESET" "$*"
         return 0
     fi
-    if apt-get install -y --no-install-recommends "$@" 2>/dev/null; then
-        ok "paquet installé : $*"
-        return 0
+    local cmd=(apt-get install -y --no-install-recommends "$@")
+    if $VERBOSE; then
+        if "${cmd[@]}"; then
+            ok "paquet installé : $*"
+            return 0
+        fi
+    else
+        if "${cmd[@]}" >>"${LOG_FILE}" 2>&1; then
+            ok "paquet installé : $*"
+            return 0
+        fi
     fi
     warn "paquet indisponible, ignoré : $* (composant apt manquant ?)"
     return 1
@@ -283,15 +307,21 @@ step() {
     CURRENT_STEP_SLUG="$1"; shift
     CURRENT_STEP_TITLE="$*"
     STEP_OPEN=true
-    printf '\n%s┃%s %s[%d/%d]%s %s%s%s\n' "$CYAN" "$RESET" "$DIM" "$STEP_CUR" "$STEP_TOTAL" "$RESET" "$BOLD" "$*" "$RESET"
+    if ! $QUIET; then
+        printf '\n%s┃%s %s[%d/%d]%s %s%s%s\n' "$CYAN" "$RESET" "$DIM" "$STEP_CUR" "$STEP_TOTAL" "$RESET" "$BOLD" "$*" "$RESET"
+    fi
     emit_step start "$(_pct_start)"
 }
 step_done() {
-    printf '  %s (%ss)\n' "$ICON_OK" "$((SECONDS - STEP_START_TS))"
+    if ! $QUIET; then
+        printf '  %s (%ss)\n' "$ICON_OK" "$((SECONDS - STEP_START_TS))"
+    fi
     _close_step ok
 }
 step_skip() {
-    printf '  %s ignoré — %s\n' "$ICON_SKIP" "$*"
+    if ! $QUIET; then
+        printf '  %s ignoré — %s\n' "$ICON_SKIP" "$*"
+    fi
     _close_step skip "$*"
 }
 
@@ -299,7 +329,15 @@ on_error() {
     local rc=$?
     echo
     err "Échec à l'étape [${STEP_CUR}/${STEP_TOTAL}] ${CURRENT_STEP_TITLE} (code ${rc})."
-    [[ -n "${LOG_FILE:-}" ]] && err "Journal complet : ${LOG_FILE}"
+    if [[ -n "${LOG_FILE:-}" && -f "${LOG_FILE}" ]]; then
+        err "Journal complet : ${LOG_FILE}"
+        if ! $VERBOSE; then
+            echo
+            printf '%s--- Dernières lignes du journal (%s) ---%s\n' "$YELLOW" "${LOG_FILE}" "$RESET"
+            tail -n 25 "${LOG_FILE}" | sed 's/^/  /' || true
+            printf '%s------------------------------------------------------------%s\n' "$YELLOW" "$RESET"
+        fi
+    fi
     STEP_OPEN=false
     emit_step error "$(_pct_start)" "code ${rc}"
     emit_event "\"event\":\"run_end\",\"status\":\"error\",\"rc\":${rc},\"step\":${STEP_CUR},\"total\":${STEP_TOTAL}"
@@ -556,6 +594,7 @@ else
         redis-server \
         avahi-daemon \
         nftables
+    ok "paquets système de base installés"
 
     # Redis sert de bus d'état partagé entre les 4 workers uvicorn : synchronisation
     # du PlaybackManager et diffusion WebSocket inter-workers. Empreinte mémoire
@@ -574,7 +613,7 @@ else
     grep -qiE '\[1002:' <<<"$GPU_LINES" && HAS_AMD_GPU=true
     grep -qiE '\[10de:' <<<"$GPU_LINES" && HAS_NVIDIA_GPU=true
     CPU_VENDOR="$(LC_ALL=C lscpu 2>/dev/null | awk -F: '/Vendor ID/{gsub(/^[ \t]+/,"",$2);print $2; exit}')"
-    log "Matériel détecté — GPU: Intel=$HAS_INTEL_GPU AMD=$HAS_AMD_GPU NVIDIA=$HAS_NVIDIA_GPU | CPU=${CPU_VENDOR:-inconnu}"
+    ok "matériel détecté — GPU: Intel=$HAS_INTEL_GPU AMD=$HAS_AMD_GPU NVIDIA=$HAS_NVIDIA_GPU | CPU=${CPU_VENDOR:-inconnu}"
 
     # Les pilotes/firmwares non libres exigent les composants non-free* : on les
     # active AVANT si du matériel en a besoin, puis on rafraîchit apt (réf.
@@ -623,8 +662,14 @@ else
             echo "  ${DIM}[dry-run]${RESET} installerait Node.js 22.x LTS (NodeSource)"
         else
             log "Installation de Node.js 22.x LTS (NodeSource)"
-            curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-            apt-get install -y nodejs
+            if $VERBOSE; then
+                curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+                apt-get install -y nodejs
+            else
+                curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >>"${LOG_FILE}" 2>&1
+                apt-get install -y nodejs >>"${LOG_FILE}" 2>&1
+            fi
+            ok "Node.js 22.x LTS installé : $(node -v 2>/dev/null || echo 'installé')"
         fi
     else
         ok "Node.js déjà présent : $(node -v)"
