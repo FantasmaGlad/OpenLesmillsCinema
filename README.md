@@ -72,8 +72,8 @@ For the full architecture, data model, network contract and API reference, see *
 
 ## Hardware requirements
 
-- An **x86-64 mini PC or thin client** (reference target: Dell Wyse 5070, Intel Gemini Lake). Any small Debian-capable PC with an Intel iGPU works; hardware video decoding is used when available.
-- **4 GB RAM** minimum, a few GB of disk for the app plus room for your video library.
+- A **mini PC or x86-64 thin client** (reference target: Dell Wyse 5070 Intel Gemini Lake, or any Intel / AMD Ryzen mini PC). Any Debian-compatible PC with an Intel iGPU (QuickSync / iHD driver) or AMD APU/GPU (Radeon / mesa-va-drivers) works; VA-API hardware video decoding is automatically detected and configured.
+- **4 GB of RAM** minimum, a few GB of disk for the system plus space for your video library.
 - **One or two screens** (HDMI for the wired output; the networked screen is any device with a browser).
 - A **local Wi-Fi network** (a router or access point) to reach the other devices — the networked second screen, the mobile remote and the radio player all connect over the local network. It needs **no internet** and keeps working even if your internet connection drops: the LAN alone is enough. Bobine can also run **fully offline with no network at all**, but then only the single wired (HDMI) screen is used.
 
